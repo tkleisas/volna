@@ -290,7 +290,7 @@ public class MainActivity extends AppCompatActivity {
         scope.setXNoteScale(xNoteScale);
         scope.setRed(red);
         rootNoteSpinner = (Spinner) findViewById(R.id.rootNoteSpinner);
-        final ArrayAdapter<String> rootNoteAdapter = new ArrayAdapter<String>(this, R.layout.support_simple_spinner_dropdown_item, rootNotes);
+        final ArrayAdapter<String> rootNoteAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, rootNotes);
 
         rootNoteSpinner.setAdapter(rootNoteAdapter);
         rootNoteSpinner.setSelection(rootNote);
@@ -310,7 +310,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-        final ArrayAdapter<String> scaleAdapter = new ArrayAdapter<String>(this, R.layout.support_simple_spinner_dropdown_item, scaleNames);
+        final ArrayAdapter<String> scaleAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, scaleNames);
         scaleSpinner = (Spinner) findViewById(R.id.scaleSpinner);
         scaleSpinner.setAdapter(scaleAdapter);
 
@@ -507,134 +507,105 @@ public class MainActivity extends AppCompatActivity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (!fromUser)
                     return;
-                switch (seekBar.getId()) {
-                    case R.id.tuneSeekBar:
-                        tune = ((float) progress) / 10.0f;
-                        tuneTextView.setText("A frequency (Hz):" + tune);
-                        engine.setTune(tune);
-                        prefs.writeInt("tune", (int) (tune * 10));
-
-                        break;
-                    case R.id.tetSeekBar:
-                        tet = progress;
-                        engine.setTet(tet);
-                        tetTextView.setText("Tuning Equal Temperament:" + tet);
-                        prefs.writeInt("tet", tet);
-                        break;
-                    case R.id.octaveFactorSeekBar:
-                        octaveFactor = ((float)progress) / 1000.0f;
-                        octaveFactorTextView.setText("Octave factor (default is 2):"+octaveFactor);
-                        engine.setOctaveFactor(octaveFactor);
-                        prefs.writeInt("octaveFactor",(int)(octaveFactor*1000));
-                        break;
-                    case R.id.osc1AttackSeekBar:
-                        engine.setOsc1Attack(progress);
-                        osc1AttackTextView.setText("osc1Attack:" + engine.getOsc1Attack());
-                        prefs.writeInt("osc1Attack", engine.getOsc1Attack());
-                        engine.sendMidiCC(0, 18, engine.getOsc1Attack());
-                        break;
-                    case R.id.osc1DecaySeekBar:
-                        engine.setOsc1Decay(progress);
-                        osc1DecayTextView.setText("osc1Decay:" + engine.getOsc1Decay());
-                        prefs.writeInt("osc1Decay", engine.getOsc1Decay());
-                        engine.sendMidiCC(0, 19, engine.getOsc1Decay());
-                        break;
-                    case R.id.osc1SustainSeekBar:
-                        engine.setOsc1Sustain(progress);
-                        osc1SustainTextView.setText("osc1Sustain:" + engine.getOsc1Sustain());
-                        prefs.writeInt("osc1Sustain", engine.getOsc1Sustain());
-                        engine.sendMidiCC(0, 20, engine.getOsc1Sustain());
-                        break;
-                    case R.id.osc1ReleaseSeekBar:
-                        engine.setOsc1Release(progress);
-                        osc1ReleaseTextView.setText("osc1Release:" + engine.getOsc1Release());
-                        prefs.writeInt("osc1Release", engine.getOsc1Release());
-                        engine.sendMidiCC(0, 21, engine.getOsc1Release());
-                        break;
-                    case R.id.osc2AttackSeekBar:
-                        engine.setOsc2Attack(progress);
-                        osc2AttackTextView.setText("osc2Attack:" + engine.getOsc2Attack());
-                        prefs.writeInt("osc2Attack", engine.getOsc2Attack());
-                        engine.sendMidiCC(0, 22, engine.getOsc2Attack());
-                        break;
-                    case R.id.osc2DecaySeekBar:
-                        engine.setOsc2Decay(progress);
-                        osc2DecayTextView.setText("osc2Decay:" + engine.getOsc2Decay());
-                        prefs.writeInt("osc2Decay", engine.getOsc2Decay());
-
-                        engine.sendMidiCC(0, 23, engine.getOsc2Decay());
-                        break;
-                    case R.id.osc2SustainSeekBar:
-                        engine.setOsc2Sustain(progress);
-                        osc2SustainTextView.setText("osc2Sustain:" + engine.getOsc2Sustain());
-                        prefs.writeInt("osc2Sustain", engine.getOsc2Sustain());
-
-
-                        engine.sendMidiCC(0, 24, engine.getOsc2Sustain());
-                        break;
-                    case R.id.osc2ReleaseSeekBar:
-                        engine.setOsc2Release(progress);
-                        osc2ReleaseTextView.setText("osc2Release:" + engine.getOsc2Release());
-                        prefs.writeInt("osc2Release", engine.getOsc2Release());
-
-                        engine.sendMidiCC(0, 25, engine.getOsc2Release());
-                        break;
-                    case R.id.maxSpreadSeekBar:
-                        maxSpread = progress;
-                        oscSpreadTextView.setText("oscSpread:" + maxSpread);
-                        prefs.writeInt("maxSpread", maxSpread);
-                        break;
-
-                    case R.id.osc1WaveSeekBar:
-                        osc1Wave = progress;
-                        osc1WaveDisplay.setData(engine.getWavetable(osc1Wave));
-                        engine.sendMidiCC(0,16,osc1Wave);
-                        osc1WaveTextView.setText("osc1Wave:" + osc1Wave);
-                        osc1WaveDisplay.invalidate();
-                        prefs.writeInt("osc1Wave", osc1Wave);
-
-                        break;
-                    case R.id.osc2WaveSeekBar:
-                        osc2Wave = progress;
-                        osc2WaveDisplay.setData(engine.getWavetable(osc2Wave));
-                        engine.sendMidiCC(0,17,osc2Wave);
-                        osc2WaveTextView.setText("osc2Wave:" + osc2Wave);
-                        osc2WaveDisplay.invalidate();
-                        prefs.writeInt("osc2Wave", osc2Wave);
-                        break;
-                    case R.id.osc1WaveControlSeekBar:
-                        osc1WaveControl = progress;
-                        osc1WaveControlTextView.setText("osc1WaveControl:" + osc1WaveControl);
-
-                        prefs.writeInt("osc1WaveControl", osc1WaveControl);
-                        break;
-                    case R.id.osc2WaveControlSeekBar:
-                        osc2WaveControl = progress;
-                        osc2WaveControlTextView.setText("osc2WaveControl:" + osc2WaveControl);
-
-                        prefs.writeInt("osc2WaveControl", osc2WaveControl);
-                        break;
-                    case R.id.delayLevelSeekBar:
-                        delayLevel = progress;
-                        engine.setDelayLevel(delayLevel);
-                        prefs.writeInt("delayLevel",delayLevel);
-                        break;
-                    case R.id.delayTimeSeekBar:
-                        delayTime = progress;
-                        engine.setDelayTime(delayTime);
-                        prefs.writeInt("delayTime",delayTime);
-                        break;
-                    case R.id.delayFeedbackSeekBar:
-                        delayFeedback = progress;
-                        engine.setDelayFeedback(delayFeedback);
-                        prefs.writeInt("delayFeedback",delayFeedback);
-                        break;
-                    case R.id.gridSizeSeekBar:
-                        xNoteScale = progress;
-                        prefs.writeInt("xNoteScale", xNoteScale);
-                        scope.setXNoteScale(xNoteScale);
-                        scope.invalidate();
-                        break;
+                int id = seekBar.getId();
+                if (id == R.id.tuneSeekBar) {
+                    tune = ((float) progress) / 10.0f;
+                    tuneTextView.setText("A frequency (Hz):" + tune);
+                    engine.setTune(tune);
+                    prefs.writeInt("tune", (int) (tune * 10));
+                } else if (id == R.id.tetSeekBar) {
+                    tet = progress;
+                    engine.setTet(tet);
+                    tetTextView.setText("Tuning Equal Temperament:" + tet);
+                    prefs.writeInt("tet", tet);
+                } else if (id == R.id.octaveFactorSeekBar) {
+                    octaveFactor = ((float)progress) / 1000.0f;
+                    octaveFactorTextView.setText("Octave factor (default is 2):"+octaveFactor);
+                    engine.setOctaveFactor(octaveFactor);
+                    prefs.writeInt("octaveFactor",(int)(octaveFactor*1000));
+                } else if (id == R.id.osc1AttackSeekBar) {
+                    engine.setOsc1Attack(progress);
+                    osc1AttackTextView.setText("osc1Attack:" + engine.getOsc1Attack());
+                    prefs.writeInt("osc1Attack", engine.getOsc1Attack());
+                    engine.sendMidiCC(0, 18, engine.getOsc1Attack());
+                } else if (id == R.id.osc1DecaySeekBar) {
+                    engine.setOsc1Decay(progress);
+                    osc1DecayTextView.setText("osc1Decay:" + engine.getOsc1Decay());
+                    prefs.writeInt("osc1Decay", engine.getOsc1Decay());
+                    engine.sendMidiCC(0, 19, engine.getOsc1Decay());
+                } else if (id == R.id.osc1SustainSeekBar) {
+                    engine.setOsc1Sustain(progress);
+                    osc1SustainTextView.setText("osc1Sustain:" + engine.getOsc1Sustain());
+                    prefs.writeInt("osc1Sustain", engine.getOsc1Sustain());
+                    engine.sendMidiCC(0, 20, engine.getOsc1Sustain());
+                } else if (id == R.id.osc1ReleaseSeekBar) {
+                    engine.setOsc1Release(progress);
+                    osc1ReleaseTextView.setText("osc1Release:" + engine.getOsc1Release());
+                    prefs.writeInt("osc1Release", engine.getOsc1Release());
+                    engine.sendMidiCC(0, 21, engine.getOsc1Release());
+                } else if (id == R.id.osc2AttackSeekBar) {
+                    engine.setOsc2Attack(progress);
+                    osc2AttackTextView.setText("osc2Attack:" + engine.getOsc2Attack());
+                    prefs.writeInt("osc2Attack", engine.getOsc2Attack());
+                    engine.sendMidiCC(0, 22, engine.getOsc2Attack());
+                } else if (id == R.id.osc2DecaySeekBar) {
+                    engine.setOsc2Decay(progress);
+                    osc2DecayTextView.setText("osc2Decay:" + engine.getOsc2Decay());
+                    prefs.writeInt("osc2Decay", engine.getOsc2Decay());
+                    engine.sendMidiCC(0, 23, engine.getOsc2Decay());
+                } else if (id == R.id.osc2SustainSeekBar) {
+                    engine.setOsc2Sustain(progress);
+                    osc2SustainTextView.setText("osc2Sustain:" + engine.getOsc2Sustain());
+                    prefs.writeInt("osc2Sustain", engine.getOsc2Sustain());
+                    engine.sendMidiCC(0, 24, engine.getOsc2Sustain());
+                } else if (id == R.id.osc2ReleaseSeekBar) {
+                    engine.setOsc2Release(progress);
+                    osc2ReleaseTextView.setText("osc2Release:" + engine.getOsc2Release());
+                    prefs.writeInt("osc2Release", engine.getOsc2Release());
+                    engine.sendMidiCC(0, 25, engine.getOsc2Release());
+                } else if (id == R.id.maxSpreadSeekBar) {
+                    maxSpread = progress;
+                    oscSpreadTextView.setText("oscSpread:" + maxSpread);
+                    prefs.writeInt("maxSpread", maxSpread);
+                } else if (id == R.id.osc1WaveSeekBar) {
+                    osc1Wave = progress;
+                    osc1WaveDisplay.setData(engine.getWavetable(osc1Wave));
+                    engine.sendMidiCC(0,16,osc1Wave);
+                    osc1WaveTextView.setText("osc1Wave:" + osc1Wave);
+                    osc1WaveDisplay.invalidate();
+                    prefs.writeInt("osc1Wave", osc1Wave);
+                } else if (id == R.id.osc2WaveSeekBar) {
+                    osc2Wave = progress;
+                    osc2WaveDisplay.setData(engine.getWavetable(osc2Wave));
+                    engine.sendMidiCC(0,17,osc2Wave);
+                    osc2WaveTextView.setText("osc2Wave:" + osc2Wave);
+                    osc2WaveDisplay.invalidate();
+                    prefs.writeInt("osc2Wave", osc2Wave);
+                } else if (id == R.id.osc1WaveControlSeekBar) {
+                    osc1WaveControl = progress;
+                    osc1WaveControlTextView.setText("osc1WaveControl:" + osc1WaveControl);
+                    prefs.writeInt("osc1WaveControl", osc1WaveControl);
+                } else if (id == R.id.osc2WaveControlSeekBar) {
+                    osc2WaveControl = progress;
+                    osc2WaveControlTextView.setText("osc2WaveControl:" + osc2WaveControl);
+                    prefs.writeInt("osc2WaveControl", osc2WaveControl);
+                } else if (id == R.id.delayLevelSeekBar) {
+                    delayLevel = progress;
+                    engine.setDelayLevel(delayLevel);
+                    prefs.writeInt("delayLevel",delayLevel);
+                } else if (id == R.id.delayTimeSeekBar) {
+                    delayTime = progress;
+                    engine.setDelayTime(delayTime);
+                    prefs.writeInt("delayTime",delayTime);
+                } else if (id == R.id.delayFeedbackSeekBar) {
+                    delayFeedback = progress;
+                    engine.setDelayFeedback(delayFeedback);
+                    prefs.writeInt("delayFeedback",delayFeedback);
+                } else if (id == R.id.gridSizeSeekBar) {
+                    xNoteScale = progress;
+                    prefs.writeInt("xNoteScale", xNoteScale);
+                    scope.setXNoteScale(xNoteScale);
+                    scope.invalidate();
                 }
             }
 
