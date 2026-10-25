@@ -5,10 +5,15 @@ import android.media.AudioManager;
 import android.os.Build;
 
 public class SynthEngine {
+    public static final int ENGINE_LEGACY = 0;
+    public static final int ENGINE_YAWN_WAVETABLE = 1;
+    public static final int ENGINE_YAWN_SUBTRACTIVE = 2;
+
     static {
         System.loadLibrary("wavesynth-lib");
     }
     private int sampleRate;
+    private int engineMode = ENGINE_LEGACY;
     public SynthEngine(Context context,int sampleRate)
     {
         this.context = context;
@@ -28,7 +33,12 @@ public class SynthEngine {
             int defaultFramesPerBurst = Integer.parseInt(framesPerBurstStr);
 
             setVAEngineDefaultStreamValues(defaultSampleRate, defaultFramesPerBurst);
-            initVAEngine(sampleRate);
+            this.sampleRate = defaultSampleRate;
+            if (engineMode == ENGINE_LEGACY) {
+                initVAEngine(defaultSampleRate);
+            } else {
+                initYawnEngine(defaultSampleRate, engineMode - 1);
+            }
 
 
 
@@ -69,6 +79,8 @@ public class SynthEngine {
     public native float[] getWaveform();
     public native float[] getWavetable(int index);
     public native int setWavetable(int index, float[] wavetable);
+    public native int setWavetableBank(float[] bank);
+    public native int resetWavetableBank();
     public native int setTet(int newTet);
     public native int setTune(float newTune);
     public native int setOctaveFactor(float factor);
@@ -77,6 +89,86 @@ public class SynthEngine {
     public native int setDelayLevel(int level);
     public native int setDelayTime(int time);
     public native int setDelayFeedback(int feedback);
+    public native int pauseAudio();
+    public native int resumeAudio();
+    public native int shutdownVAEngine();
+
+    public native int initYawnEngine(int sampleRate, int instrumentIndex);
+    public native int switchEngine(int mode, int instrumentIndex);
+    public native int selectYawnInstrument(int instrumentIndex);
+
+    public native int getYawnInstrumentCount();
+    public native String getYawnInstrumentName(int index);
+    public native String getYawnInstrumentId(int index);
+    public native int getYawnInstrumentParamCount();
+    public native String getYawnInstrumentParamName(int index);
+    public native float getYawnInstrumentParamMin(int index);
+    public native float getYawnInstrumentParamMax(int index);
+    public native float getYawnInstrumentParamDefault(int index);
+    public native boolean isYawnInstrumentParamBoolean(int index);
+    public native int getYawnInstrumentParamLabelCount(int index);
+    public native String getYawnInstrumentParamLabel(int index, int label);
+    public native float getYawnInstrumentParamValue(int index);
+    public native int setYawnInstrumentParam(int index, float value);
+
+    public native int getYawnMidiEffectCount();
+    public native String getYawnMidiEffectName(int index);
+    public native String getYawnMidiEffectId(int index);
+    public native int getYawnMidiEffectParamCount(int effect);
+    public native String getYawnMidiEffectParamName(int effect, int index);
+    public native float getYawnMidiEffectParamMin(int effect, int index);
+    public native float getYawnMidiEffectParamMax(int effect, int index);
+    public native float getYawnMidiEffectParamDefault(int effect, int index);
+    public native boolean isYawnMidiEffectParamBoolean(int effect, int index);
+    public native int getYawnMidiEffectParamLabelCount(int effect, int index);
+    public native String getYawnMidiEffectParamLabel(int effect, int index, int label);
+    public native float getYawnMidiEffectParamValue(int effect, int index);
+    public native int setYawnMidiEffectParam(int effect, int index, float value);
+    public native boolean isYawnMidiEffectBypassed(int effect);
+    public native int setYawnMidiEffectBypassed(int effect, boolean bypassed);
+
+    public native int getYawnAudioEffectCount();
+    public native String getYawnAudioEffectName(int index);
+    public native String getYawnAudioEffectId(int index);
+    public native int getYawnAudioEffectParamCount(int effect);
+    public native String getYawnAudioEffectParamName(int effect, int index);
+    public native float getYawnAudioEffectParamMin(int effect, int index);
+    public native float getYawnAudioEffectParamMax(int effect, int index);
+    public native float getYawnAudioEffectParamDefault(int effect, int index);
+    public native boolean isYawnAudioEffectParamBoolean(int effect, int index);
+    public native int getYawnAudioEffectParamLabelCount(int effect, int index);
+    public native String getYawnAudioEffectParamLabel(int effect, int index, int label);
+    public native float getYawnAudioEffectParamValue(int effect, int index);
+    public native int setYawnAudioEffectParam(int effect, int index, float value);
+    public native boolean isYawnAudioEffectBypassed(int effect);
+    public native int setYawnAudioEffectBypassed(int effect, boolean bypassed);
+
+    public native int setYawnTempo(float bpm);
+    public native int setYawnMasterVolume(float volume);
+    public native int sendYawnPolyPressure(int channel, int note, int pressure);
+    public native int sendYawnChannelPressure(int channel, int pressure);
+    public native int sendYawnAllNotesOff();
+    public native String loadYawnWavetable(String path);
+    public native String saveYawnWavetable(String path);
+    public native int resetYawnWavetable();
+    public native boolean hasYawnCustomWavetable();
+    public native float[] getYawnWavetableFrame(float position);
+
+    public int getEngineMode() {
+        return engineMode;
+    }
+
+    public void setEngineMode(int mode) {
+        engineMode = mode;
+    }
+
+    public int switchEngine(int mode) {
+        engineMode = mode;
+        if (mode == ENGINE_LEGACY) {
+            return switchEngine(ENGINE_LEGACY, 0);
+        }
+        return switchEngine(1, mode - 1);
+    }
 
     public int getSampleRate() {
         return sampleRate;

@@ -55,6 +55,28 @@
                 android:layout_height = "wrap_content"
                 android:text = "Close Settings"
                 />
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="20dp"
+
+                />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Sound engine" />
+
+            <Spinner
+                android:id="@+id/engineSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <LinearLayout
+                android:id="@+id/yawnControls"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -535,6 +557,38 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Wavetable bank" />
+
+            <TextView
+                android:id="@+id/customWavetableText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:text="Factory wavetables" />
+
+            <Button
+                android:id="@+id/importWavetableButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="20sp"
+                android:text="Import .vwt wavetable..." />
+
+            <Button
+                android:id="@+id/resetWavetableButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="20sp"
+                android:text="Restore factory bank" />
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="20dp"
+
+                />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:textSize="20sp"
                 android:text="Select an input midi device"
                 />
@@ -561,6 +615,49 @@
                 android:layout_height="wrap_content"
                 android:entries="@array/senders"
                 />
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="20dp"
+                />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="RTP-MIDI controller (YAWN)" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:text="YAWN host IP address" />
+            <EditText
+                android:id="@+id/rtpMidiHostEditText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:hint="192.168.1.100" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:text="UDP port" />
+            <EditText
+                android:id="@+id/rtpMidiPortEditText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:text="5004" />
+            <ToggleButton
+                android:id="@+id/rtpMidiToggleButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textOn="RTP-MIDI ON"
+                android:textOff="RTP-MIDI OFF" />
+            <TextView
+                android:id="@+id/rtpMidiStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:text="RTP-MIDI off" />
         </LinearLayout>
 
 

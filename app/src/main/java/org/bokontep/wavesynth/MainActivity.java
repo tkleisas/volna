@@ -12,6 +12,7 @@ import android.media.midi.MidiDevice;
 import android.media.midi.MidiDeviceInfo;
 import android.media.midi.MidiManager;
 import android.media.midi.MidiReceiver;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.Editable;
@@ -25,11 +26,15 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 
 import org.bokontep.midi.MidiConstants;
 import org.bokontep.midi.MidiInputPortSelector;
@@ -37,9 +42,10 @@ import org.bokontep.midi.MidiOutputPortConnectionSelector;
 import org.bokontep.midi.MidiPortConnector;
 import org.bokontep.midi.MidiTools;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-
-import static android.view.MotionEvent.AXIS_Y;
+import java.io.InputStream;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
     static final String TAG = "Volna";
@@ -103,6 +109,30 @@ public class MainActivity extends AppCompatActivity {
     private EditText lowOffsetEditText;
     private EditText midOffsetEditText;
     private EditText highOffsetEditText;
+
+    private WavetableStore wavetableStore;
+    private TextView customWavetableText;
+    private Spinner engineSpinner;
+    private LinearLayout yawnControls;
+    private int midiFxIndex = 0;
+    private int audioFxIndex = 0;
+    private float yawnTempo = 120.0f;
+    private float yawnMasterVolume = 0.8f;
+
+    private RtpMidiClient rtpMidiClient;
+    private EditText rtpMidiHostEditText;
+    private EditText rtpMidiPortEditText;
+    private ToggleButton rtpMidiToggleButton;
+    private TextView rtpMidiStatusText;
+    private final Runnable rtpMidiRestart = () -> {
+        if (rtpMidiToggleButton != null && rtpMidiToggleButton.isChecked()) {
+            startRtpMidi();
+        }
+    };
+
+    private final ActivityResultLauncher<String[]> importWavetableLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(),
+                    this::onWavetableFileSelected);
 
     private ToggleButton redToggleButton;
     private ToggleButton legatoToggleButton;
@@ -208,13 +238,22 @@ public class MainActivity extends AppCompatActivity {
 
         prefs = new AppPreferences(this);
         engine = new SynthEngine(this, 44100);
+        wavetableStore = new WavetableStore(this);
         lowOffset = prefs.readInt("lowOffset",0);
         midOffset = prefs.readInt("midOffset",12);
         highOffset = prefs.readInt("highOffset",24);
         delayLevel = prefs.readInt("delayLevel",0);
         delayTime = prefs.readInt("delayTime",0);
         delayFeedback = prefs.readInt("delayFeedback",0);
+        engine.setEngineMode(prefs.readInt("engineMode",
+                SynthEngine.ENGINE_YAWN_WAVETABLE));
+        yawnTempo = prefs.readInt("yawnTempo", 1200) / 10.0f;
+        yawnMasterVolume = prefs.readInt("yawnMasterVolume", 800) / 1000.0f;
         engine.initAudio();
+        if (engine.getEngineMode() != SynthEngine.ENGINE_LEGACY) {
+            engine.setYawnTempo(yawnTempo);
+            engine.setYawnMasterVolume(yawnMasterVolume);
+        }
 
         tune = (prefs.readInt("tune", 4400) / 10.0f);
         tet = prefs.readInt("tet", 12);
@@ -230,7 +269,6 @@ public class MainActivity extends AppCompatActivity {
         osc2Wave = prefs.readInt("osc2Wave", 0);
         osc1WaveControl = prefs.readInt("osc1WaveControl", 255);
         osc2WaveControl = prefs.readInt("osc2WaveControl", 255);
-        engine.initSynthParameters();
         engine.setOsc1Volume(prefs.readInt("osc1Volume", 127));
         engine.setOsc2Volume(prefs.readInt("osc2Volume", 127));
         engine.setOsc1Attack(prefs.readInt("osc1Attack", 10));
@@ -247,6 +285,9 @@ public class MainActivity extends AppCompatActivity {
         engine.setTune(tune);
         engine.setTet(tet);
         engine.setOctaveFactor(octaveFactor);
+        engine.initSynthParameters();
+        engine.sendMidiCC(0, 16, osc1Wave);
+        engine.sendMidiCC(0, 17, osc2Wave);
         rootNoteStr = this.midiNoteToString(rootNote);
 
         setContentView(R.layout.activity_main);
@@ -255,6 +296,37 @@ public class MainActivity extends AppCompatActivity {
         mHandler = new Handler();
         tvVersion = findViewById(R.id.tv_version);
         tvVersion.setText("волна v."+BuildConfig.VERSION_NAME);
+        engineSpinner = (Spinner) findViewById(R.id.engineSpinner);
+        final String[] engineNames = {
+                "Volna Classic",
+                "YAWN Wavetable",
+                "YAWN Subtractive"
+        };
+        engineSpinner.setAdapter(new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_dropdown_item, engineNames));
+        engineSpinner.setSelection(engine.getEngineMode());
+        engineSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view,
+                                       int position, long id) {
+                if (position == engine.getEngineMode()) {
+                    return;
+                }
+                engine.switchEngine(position);
+                prefs.writeInt("engineMode", position);
+                rebuildYawnControls();
+                updateWavetableViews();
+                if (wavetableStore.hasStoredWavetable()) {
+                    restoreSavedWavetable();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        yawnControls = (LinearLayout) findViewById(R.id.yawnControls);
+        rebuildYawnControls();
         redToggleButton = (ToggleButton) findViewById(R.id.redToggleButton);
         redToggleButton.setOnCheckedChangeListener(
                 new CompoundButton.OnCheckedChangeListener() {
@@ -336,11 +408,11 @@ public class MainActivity extends AppCompatActivity {
         this.tetTextView = (TextView) findViewById(R.id.tetText);
         this.tetTextView.setText("Tuning Equal Temperament (TET):" + tet);
         this.tuneSeekBar = (SeekBar) findViewById(R.id.tuneSeekBar);
-        this.tuneSeekBar.setProgress((int) tune * 10);
+        this.tuneSeekBar.setProgress((int) (tune * 10));
         this.octaveFactorTextView = (TextView)findViewById(R.id.octaveFactorText);
         this.octaveFactorTextView.setText("Octave factor (default is 2):"+octaveFactor);
         this.octaveFactorSeekBar = (SeekBar)findViewById(R.id.octaveFactorSeekBar);
-        this.octaveFactorSeekBar.setProgress((int)octaveFactor*1000);
+        this.octaveFactorSeekBar.setProgress((int) (octaveFactor * 1000));
 
 
         this.osc1AttackSeekBar = (SeekBar) findViewById(R.id.osc1AttackSeekBar);
@@ -348,9 +420,9 @@ public class MainActivity extends AppCompatActivity {
         this.osc1DecaySeekBar = (SeekBar) findViewById(R.id.osc1DecaySeekBar);
         this.osc1DecaySeekBar.setProgress(engine.getOsc1Decay());
         this.osc1SustainSeekBar = (SeekBar) findViewById(R.id.osc1SustainSeekBar);
-        this.osc1SustainSeekBar.setProgress(engine.getOsc2Sustain());
+        this.osc1SustainSeekBar.setProgress(engine.getOsc1Sustain());
         this.osc1ReleaseSeekBar = (SeekBar) findViewById(R.id.osc1ReleaseSeekBar);
-        this.osc1ReleaseSeekBar.setProgress(engine.getOsc2Release());
+        this.osc1ReleaseSeekBar.setProgress(engine.getOsc1Release());
         this.osc2AttackSeekBar = (SeekBar) findViewById(R.id.osc2AttackSeekBar);
         this.osc2AttackSeekBar.setProgress(engine.getOsc2Attack());
         this.osc2DecaySeekBar = (SeekBar) findViewById(R.id.osc2DecaySeekBar);
@@ -413,6 +485,12 @@ public class MainActivity extends AppCompatActivity {
         this.osc2WaveDisplay = (WaveDisplay) findViewById(R.id.osc2WaveDisplay);
         this.osc2WaveDisplay.setData(engine.getWavetable(osc2Wave));
         this.osc2WaveDisplay.setRed(red);
+        this.customWavetableText = (TextView) findViewById(R.id.customWavetableText);
+        findViewById(R.id.importWavetableButton).setOnClickListener(
+                v -> importWavetableLauncher.launch(new String[]{"*/*"}));
+        findViewById(R.id.resetWavetableButton).setOnClickListener(
+                v -> restoreFactoryWavetable("Factory wavetables restored"));
+        restoreSavedWavetable();
         this.lowOffsetEditText = (EditText) findViewById(R.id.lowOffsetEditText);
         this.midOffsetEditText = (EditText) findViewById(R.id.middleOffsetEditText);
         this.highOffsetEditText = (EditText) findViewById(R.id.highOffsetEditText);
@@ -688,7 +766,8 @@ public class MainActivity extends AppCompatActivity {
         this.tempoButton.setVisibility(View.INVISIBLE);
         this.optionsScrollView = findViewById(R.id.optionsScrollView);
         this.menuView = findViewById(R.id.menu);
-        this.menuView.setVisibility(View.GONE);
+        this.optionsScrollView.setVisibility(View.GONE);
+        this.menuView.setVisibility(View.VISIBLE);
         this.settingsButton.setOnClickListener(
                 new View.OnClickListener() {
                     @Override
@@ -721,10 +800,15 @@ public class MainActivity extends AppCompatActivity {
                     .show();
         }
 
+        setupRtpMidi();
+
 
         screenUpdater = new Runnable() {
             @Override
             public void run() {
+                if (engine == null) {
+                    return;
+                }
                 /*
                 long now = new java.util.Date().getTime();
                 if ((touchPoints == 0) && (now - lastTouchEventTime) > 60000) {
@@ -887,7 +971,10 @@ public class MainActivity extends AppCompatActivity {
         lastTouchEventTime = new java.util.Date().getTime();
         int action = event.getActionMasked();
         int index = event.getActionIndex();
-        float height = event.getDevice().getMotionRange(AXIS_Y).getRange();
+        float height = getWindow().getDecorView().getHeight();
+        if (height <= 0) {
+            height = getResources().getDisplayMetrics().heightPixels;
+        }
         int activepointers = event.getPointerCount() % 10; // do not track more than 10
         touchPoints = activepointers;
 
@@ -938,7 +1025,7 @@ public class MainActivity extends AppCompatActivity {
             int waveform2 = (this.osc2Wave + (wi * this.osc2WaveControl) / factor) % 256;
             engine.selectWaveform(0, 0, midinote, waveform1);
             engine.selectWaveform(0, 1, midinote, waveform2);
-            float pressure = event.getPressure();
+            float pressure = event.getPressure(i);
             if(pressure<0.25f)
             {
                 pressure = 0.25f;
@@ -1194,6 +1281,9 @@ public class MainActivity extends AppCompatActivity {
     }
     private void midiSend(byte[] buffer, int count, long timestamp)
     {
+        if (rtpMidiClient != null) {
+            rtpMidiClient.send(buffer, count);
+        }
         try {
             if (this.midiInputPortSelector != null) {
                 MidiReceiver receiver = this.midiInputPortSelector.getReceiver();
@@ -1206,6 +1296,516 @@ public class MainActivity extends AppCompatActivity {
 
         }
 
+    }
+
+    private void setupRtpMidi() {
+        rtpMidiClient = new RtpMidiClient();
+        rtpMidiHostEditText = (EditText) findViewById(R.id.rtpMidiHostEditText);
+        rtpMidiPortEditText = (EditText) findViewById(R.id.rtpMidiPortEditText);
+        rtpMidiToggleButton = (ToggleButton) findViewById(R.id.rtpMidiToggleButton);
+        rtpMidiStatusText = (TextView) findViewById(R.id.rtpMidiStatusText);
+
+        rtpMidiHostEditText.setText(prefs.readString("rtpMidiHost", ""));
+        rtpMidiPortEditText.setText(String.valueOf(
+                prefs.readInt("rtpMidiPort", 5004)));
+
+        TextWatcher watcher = new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count,
+                                          int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before,
+                                      int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                prefs.writeString("rtpMidiHost",
+                        rtpMidiHostEditText.getText().toString().trim());
+                int port = 5004;
+                try {
+                    port = Integer.parseInt(
+                            rtpMidiPortEditText.getText().toString().trim());
+                } catch (NumberFormatException ignored) {
+                }
+                prefs.writeInt("rtpMidiPort", port);
+                mHandler.removeCallbacks(rtpMidiRestart);
+                mHandler.postDelayed(rtpMidiRestart, 700);
+            }
+        };
+        rtpMidiHostEditText.addTextChangedListener(watcher);
+        rtpMidiPortEditText.addTextChangedListener(watcher);
+
+        boolean enabled = prefs.readInt("rtpMidiEnabled", 0) == 1;
+        rtpMidiToggleButton.setChecked(enabled);
+        rtpMidiToggleButton.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    prefs.writeInt("rtpMidiEnabled", checked ? 1 : 0);
+                    if (checked) {
+                        startRtpMidi();
+                    } else {
+                        stopRtpMidi();
+                    }
+                });
+        if (enabled && !rtpMidiHostEditText.getText().toString().trim().isEmpty()) {
+            startRtpMidi();
+        }
+    }
+
+    private void startRtpMidi() {
+        if (rtpMidiClient == null) {
+            return;
+        }
+        String host = rtpMidiHostEditText.getText().toString().trim();
+        int port = 5004;
+        try {
+            port = Integer.parseInt(
+                    rtpMidiPortEditText.getText().toString().trim());
+        } catch (NumberFormatException ignored) {
+        }
+        rtpMidiClient.start(host, port, (message, error) ->
+                runOnUiThread(() -> {
+                    if (rtpMidiStatusText == null) {
+                        return;
+                    }
+                    rtpMidiStatusText.setText(message);
+                    rtpMidiStatusText.setTextColor(error ? Color.RED : Color.GREEN);
+                }));
+    }
+
+    private void stopRtpMidi() {
+        if (rtpMidiClient != null) {
+            rtpMidiClient.stop();
+        }
+        if (rtpMidiStatusText != null) {
+            rtpMidiStatusText.setText("RTP-MIDI off");
+            rtpMidiStatusText.setTextColor(Color.GRAY);
+        }
+    }
+
+    private void onWavetableFileSelected(Uri uri) {
+        if (uri == null) {
+            return;
+        }
+        new Thread(() -> {
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                if (in == null) {
+                    throw new IOException("Could not open the selected file");
+                }
+                byte[] bytes = readAll(in, VwtWavetable.MAX_FILE_BYTES);
+                VwtWavetable table = VwtWavetable.parse(bytes);
+                float[] bank = table.toVolnaBank(256, 256, 0.8f);
+                runOnUiThread(() -> applyImportedWavetable(
+                        table, bank, bytes, displayNameFromUri(uri), true));
+            } catch (Exception e) {
+                final String message = e.getMessage() == null
+                        ? "Wavetable import failed"
+                        : e.getMessage();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        message, Toast.LENGTH_LONG).show());
+            }
+        }, "wavetable-import").start();
+    }
+
+    private void restoreSavedWavetable() {
+        if (!wavetableStore.hasStoredWavetable()) {
+            customWavetableText.setText("Factory wavetables");
+            return;
+        }
+        new Thread(() -> {
+            final byte[] bytes = wavetableStore.load();
+            final String source = wavetableStore.sourceName();
+            try {
+                if (bytes == null) {
+                    throw new IOException("Stored wavetable is missing");
+                }
+                VwtWavetable table = VwtWavetable.parse(bytes);
+                float[] bank = table.toVolnaBank(256, 256, 0.8f);
+                runOnUiThread(() -> applyImportedWavetable(
+                        table, bank, bytes, source, false));
+            } catch (Exception e) {
+                wavetableStore.clear();
+                runOnUiThread(() -> {
+                    if (customWavetableText != null) {
+                        customWavetableText.setText("Factory wavetables");
+                    }
+                    Toast.makeText(MainActivity.this,
+                            "Could not restore custom wavetable; using factory bank",
+                            Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "wavetable-restore").start();
+    }
+
+    private void applyImportedWavetable(VwtWavetable table, float[] bank,
+                                        byte[] bytes, String sourceName,
+                                        boolean persist) {
+        if (engine == null || isFinishing()) {
+            return;
+        }
+        if (persist) {
+            try {
+                wavetableStore.save(bytes, table.name, sourceName);
+            } catch (IOException e) {
+                Toast.makeText(this, "Could not save the wavetable",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
+
+        final int mode = engine.getEngineMode();
+        if (mode == SynthEngine.ENGINE_LEGACY) {
+            if (engine.setWavetableBank(bank) != 0) {
+                Toast.makeText(this, "The synth rejected the wavetable",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+        } else if (mode == SynthEngine.ENGINE_YAWN_WAVETABLE) {
+            String error = engine.loadYawnWavetable(wavetableStore.filePath());
+            if (error != null) {
+                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+                return;
+            }
+        } else {
+            if (persist) {
+                engine.switchEngine(SynthEngine.ENGINE_YAWN_WAVETABLE);
+                prefs.writeInt("engineMode", SynthEngine.ENGINE_YAWN_WAVETABLE);
+                setEngineSpinnerSilently(SynthEngine.ENGINE_YAWN_WAVETABLE);
+                rebuildYawnControls();
+                String error = engine.loadYawnWavetable(wavetableStore.filePath());
+                if (error != null) {
+                    Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+        }
+
+        updateWavetableViews();
+        if (customWavetableText != null) {
+            customWavetableText.setText("Custom: " + table.name + " ("
+                    + table.frameCount + " frames, " + table.frameSize
+                    + " samples)");
+        }
+        rebuildYawnControls();
+        Toast.makeText(this, "Loaded wavetable: " + table.name,
+                Toast.LENGTH_SHORT).show();
+    }
+
+    private void restoreFactoryWavetable(String message) {
+        if (engine == null) {
+            return;
+        }
+        final int mode = engine.getEngineMode();
+        if (mode == SynthEngine.ENGINE_LEGACY) {
+            engine.resetWavetableBank();
+        } else {
+            if (mode != SynthEngine.ENGINE_YAWN_WAVETABLE) {
+                engine.switchEngine(SynthEngine.ENGINE_YAWN_WAVETABLE);
+                prefs.writeInt("engineMode", SynthEngine.ENGINE_YAWN_WAVETABLE);
+                setEngineSpinnerSilently(SynthEngine.ENGINE_YAWN_WAVETABLE);
+            }
+            engine.resetYawnWavetable();
+        }
+        if (wavetableStore != null) {
+            wavetableStore.clear();
+        }
+        updateWavetableViews();
+        rebuildYawnControls();
+        if (customWavetableText != null) {
+            customWavetableText.setText("Factory wavetables");
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    }
+
+    private void updateWavetableViews() {
+        if (engine == null) {
+            return;
+        }
+        if (engine.getEngineMode() == SynthEngine.ENGINE_LEGACY) {
+            osc1WaveDisplay.setData(engine.getWavetable(osc1Wave));
+            osc2WaveDisplay.setData(engine.getWavetable(osc2Wave));
+        } else {
+            osc1WaveDisplay.setData(engine.getYawnWavetableFrame(
+                    osc1Wave / 255.0f));
+            osc2WaveDisplay.setData(engine.getYawnWavetableFrame(
+                    osc2Wave / 255.0f));
+        }
+        osc1WaveDisplay.invalidate();
+        osc2WaveDisplay.invalidate();
+    }
+
+    private void setEngineSpinnerSilently(int mode) {
+        if (engineSpinner == null) {
+            return;
+        }
+        AdapterView.OnItemSelectedListener listener =
+                engineSpinner.getOnItemSelectedListener();
+        engineSpinner.setOnItemSelectedListener(null);
+        engineSpinner.setSelection(mode);
+        engineSpinner.setOnItemSelectedListener(listener);
+    }
+
+    private void rebuildYawnControls() {
+        if (yawnControls == null || engine == null) {
+            return;
+        }
+        yawnControls.removeAllViews();
+        final int mode = engine.getEngineMode();
+        if (mode == SynthEngine.ENGINE_LEGACY) {
+            yawnControls.setVisibility(View.GONE);
+            return;
+        }
+        yawnControls.setVisibility(View.VISIBLE);
+        addSectionHeader("Instrument: " + engine.getYawnInstrumentName(mode - 1));
+        int count = engine.getYawnInstrumentParamCount();
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            addParamSlider(yawnControls, engine.getYawnInstrumentParamName(i),
+                    engine.getYawnInstrumentParamMin(i),
+                    engine.getYawnInstrumentParamMax(i),
+                    engine.getYawnInstrumentParamValue(i),
+                    value -> engine.setYawnInstrumentParam(index, value));
+        }
+
+        addSectionHeader("Tempo / output");
+        addParamSlider(yawnControls, "Tempo", 20.0f, 300.0f, yawnTempo,
+                value -> {
+                    yawnTempo = value;
+                    engine.setYawnTempo(value);
+                    prefs.writeInt("yawnTempo", (int) (value * 10));
+                });
+        addParamSlider(yawnControls, "Master volume", 0.0f, 2.0f,
+                yawnMasterVolume, value -> {
+                    yawnMasterVolume = value;
+                    engine.setYawnMasterVolume(value);
+                    prefs.writeInt("yawnMasterVolume", (int) (value * 1000));
+                });
+
+        addSectionHeader("MIDI effects");
+        addEffectSection(true);
+        addSectionHeader("Audio effects");
+        addEffectSection(false);
+    }
+
+    private void addEffectSection(boolean midi) {
+        final int effectCount = midi ? engine.getYawnMidiEffectCount()
+                : engine.getYawnAudioEffectCount();
+        if (effectCount <= 0) {
+            return;
+        }
+        String[] names = new String[effectCount];
+        for (int i = 0; i < effectCount; i++) {
+            names[i] = midi ? engine.getYawnMidiEffectName(i)
+                    : engine.getYawnAudioEffectName(i);
+        }
+        Spinner spinner = new Spinner(this);
+        spinner.setAdapter(new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_dropdown_item, names));
+        int selected = midi ? midiFxIndex : audioFxIndex;
+        selected = Math.max(0, Math.min(effectCount - 1, selected));
+        spinner.setSelection(selected);
+        yawnControls.addView(spinner);
+
+        ToggleButton enabled = new ToggleButton(this);
+        enabled.setTextOn("Enabled");
+        enabled.setTextOff("Bypassed");
+        boolean bypassed = midi ? engine.isYawnMidiEffectBypassed(selected)
+                : engine.isYawnAudioEffectBypassed(selected);
+        enabled.setChecked(!bypassed);
+        yawnControls.addView(enabled);
+
+        LinearLayout params = new LinearLayout(this);
+        params.setOrientation(LinearLayout.VERTICAL);
+        yawnControls.addView(params);
+
+        final int initial = selected;
+        if (midi) {
+            midiFxIndex = initial;
+        } else {
+            audioFxIndex = initial;
+        }
+        populateEffectParams(midi, initial, params);
+        enabled.setOnCheckedChangeListener((button, checked) -> {
+            int index = midi ? midiFxIndex : audioFxIndex;
+            if (midi) {
+                engine.setYawnMidiEffectBypassed(index, !checked);
+            } else {
+                engine.setYawnAudioEffectBypassed(index, !checked);
+            }
+        });
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view,
+                                       int position, long id) {
+                if (midi) {
+                    midiFxIndex = position;
+                } else {
+                    audioFxIndex = position;
+                }
+                boolean fxBypassed = midi
+                        ? engine.isYawnMidiEffectBypassed(position)
+                        : engine.isYawnAudioEffectBypassed(position);
+                enabled.setOnCheckedChangeListener(null);
+                enabled.setChecked(!fxBypassed);
+                enabled.setOnCheckedChangeListener((button, checked) -> {
+                    int index = midi ? midiFxIndex : audioFxIndex;
+                    if (midi) {
+                        engine.setYawnMidiEffectBypassed(index, !checked);
+                    } else {
+                        engine.setYawnAudioEffectBypassed(index, !checked);
+                    }
+                });
+                populateEffectParams(midi, position, params);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+    }
+
+    private void populateEffectParams(boolean midi, int effect, LinearLayout parent) {
+        parent.removeAllViews();
+        int count = midi ? engine.getYawnMidiEffectParamCount(effect)
+                : engine.getYawnAudioEffectParamCount(effect);
+        if (count <= 0) {
+            TextView empty = new TextView(this);
+            empty.setText(midi ? "No MIDI parameters"
+                    : "No effect parameters");
+            parent.addView(empty);
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            String name = midi ? engine.getYawnMidiEffectParamName(effect, i)
+                    : engine.getYawnAudioEffectParamName(effect, i);
+            float min = midi ? engine.getYawnMidiEffectParamMin(effect, i)
+                    : engine.getYawnAudioEffectParamMin(effect, i);
+            float max = midi ? engine.getYawnMidiEffectParamMax(effect, i)
+                    : engine.getYawnAudioEffectParamMax(effect, i);
+            float value = midi ? engine.getYawnMidiEffectParamValue(effect, i)
+                    : engine.getYawnAudioEffectParamValue(effect, i);
+            addParamSlider(parent, name, min, max, value, v -> {
+                if (midi) {
+                    engine.setYawnMidiEffectParam(effect, index, v);
+                } else {
+                    engine.setYawnAudioEffectParam(effect, index, v);
+                }
+            });
+        }
+    }
+
+    private void addSectionHeader(String text) {
+        TextView header = new TextView(this);
+        header.setText(text);
+        header.setTextSize(20);
+        header.setPadding(0, 20, 0, 8);
+        yawnControls.addView(header);
+    }
+
+    private void addParamSlider(LinearLayout parent, String name, float min,
+                                float max, float value, ParamSetter setter) {
+        TextView label = new TextView(this);
+        label.setTextSize(16);
+        parent.addView(label);
+        SeekBar bar = new SeekBar(this);
+        bar.setMax(1000);
+        final float range = max - min;
+        int progress = range > 0.0f
+                ? Math.round((value - min) / range * 1000.0f) : 0;
+        progress = Math.max(0, Math.min(1000, progress));
+        bar.setProgress(progress);
+        label.setText(String.format(Locale.US, "%s: %.2f", name, value));
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progressValue,
+                                          boolean fromUser) {
+                if (!fromUser) {
+                    return;
+                }
+                float newValue = min + range * progressValue / 1000.0f;
+                label.setText(String.format(Locale.US, "%s: %.2f", name,
+                        newValue));
+                setter.set(newValue);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+        parent.addView(bar);
+    }
+
+    private interface ParamSetter {
+        void set(float value);
+    }
+
+    private static byte[] readAll(InputStream in, int maxBytes) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        int total = 0;
+        while ((read = in.read(buffer)) != -1) {
+            total += read;
+            if (total > maxBytes) {
+                throw new IOException("The wavetable file is too large");
+            }
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
+    }
+
+    private static String displayNameFromUri(Uri uri) {
+        String path = uri.getLastPathSegment();
+        if (path == null || path.isEmpty()) {
+            return "Imported wavetable";
+        }
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return slash >= 0 ? path.substring(slash + 1) : path;
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (mHandler != null && screenUpdater != null) {
+            mHandler.removeCallbacks(screenUpdater);
+        }
+        if (engine != null) {
+            engine.pauseAudio();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (engine != null) {
+            engine.resumeAudio();
+        }
+        if (mHandler != null && screenUpdater != null) {
+            mHandler.removeCallbacks(screenUpdater);
+            mHandler.postDelayed(screenUpdater, updateInterval);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (mHandler != null && screenUpdater != null) {
+            mHandler.removeCallbacks(screenUpdater);
+        }
+        if (rtpMidiClient != null) {
+            rtpMidiClient.stop();
+            rtpMidiClient = null;
+        }
+        if (engine != null) {
+            engine.shutdownVAEngine();
+            engine = null;
+        }
+        super.onDestroy();
     }
 
 }

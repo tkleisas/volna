@@ -10,8 +10,11 @@ class Delay {
 public:
     Delay(int length)
     {
-        this->len = length;
-        buffer = new float[length];
+        this->len = length > 0 ? length : 1;
+        buffer = new float[this->len]();
+        this->dtime = this->len;
+        this->feedback = 0.0f;
+        this->idx = 0;
     }
 
     ~Delay()
@@ -20,9 +23,10 @@ public:
     }
     void SetDelay(int delaytime)
     {
-        if(delaytime<=len) {
+        if(delaytime < 1) {
+            this->dtime = 1;
+        } else if(delaytime <= len) {
             this->dtime = delaytime;
-
         }
         else{
             this->dtime = len;
@@ -53,8 +57,12 @@ public:
     }
     float Process(float in)
     {
+        if (dtime <= 0 || idx >= dtime) {
+            idx = 0;
+        }
         float out = buffer[idx];
-        buffer[idx++] = in+out*feedback;
+        buffer[idx] = in + out*feedback;
+        idx++;
         if(idx>=dtime)
             idx = 0;
         return out;

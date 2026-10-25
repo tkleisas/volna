@@ -23,19 +23,59 @@ Below you can see an image of the program in action:
 And you can see a short demo in this youtube video:
 https://youtu.be/Cf_wpDYhudk
 
-How to download code and compile application:
+# Development build
 
-Open command prompt
+Requirements: JDK 17, Android SDK (API 34), NDK `27.2.12479018`, and CMake `3.22.1`.
 
-Clone this repository: git clone https://github.com/bokontep/volna.git
+```sh
+git clone --recursive https://github.com/bokontep/volna.git
+cd volna
+./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest
+```
 
-Change to volna directory: cd volna
+The debug APK is written to `app/build/outputs/apk/debug/`. You can also open the
+project in Android Studio, make sure the NDK above is installed, and build the
+`app` configuration.
 
-Init submodules: git submodule init
+# Sound engine
 
-Fetch submodules: git submodule update
+Volna now includes a second engine built from YAWN's portable DSP modules:
 
-Now you are ready to build. Open the project with Android Studio (Version 4.0 should work) and build your project. You should have NDK installed.
+- **Volna Classic** — the original 256-table dual-wavetable engine.
+- **YAWN Wavetable** — YAWN's 16-voice wavetable synth with morphing,
+  filter/envelope controls, unison and custom `.vwt` tables.
+- **YAWN Subtractive** — YAWN's virtual-analog synth (2 oscillators + sub +
+  noise, state-variable filter, LFO, ADSR envelopes).
+
+The YAWN engine also hosts a MIDI-effect chain (Arpeggiator, Chord, Scale, Note
+Length, Velocity, Random, Pitch, LFO) and an audio-effect chain (Delay, Chorus,
+Reverb, Filter, Distortion, EQ, Compressor, Limiter). Select an effect and use
+the **Enabled/Bypassed** toggle in the settings panel. Tempo and master volume
+are saved with the other preferences.
+
+## Wavetables
+
+Use **Import .vwt wavetable...** in the settings panel to load a VWaveEditor
+`.vwt` v1/v2 file. The imported table is validated, previewed, persisted in the
+app's private storage, and restored on the next launch. **Restore factory bank**
+returns to the built-in tables. In YAWN Wavetable mode the file is loaded
+directly by YAWN's wavetable synth; in Volna Classic mode it is resampled into
+the 256-slot morph bank.
+
+## RTP-MIDI controller (YAWN)
+
+Volna can send its touch output directly to YAWN over Wi-Fi:
+
+1. Start YAWN on a computer on the same network. It listens for sessionless
+   RTP-MIDI on UDP port `5004` (override with `YAWN_RTP_MIDI_PORT`).
+2. In Volna's settings, enter the YAWN host IP, leave the port at `5004`, and
+   enable **RTP-MIDI ON**.
+3. In YAWN, arm a MIDI track and set its input to **All Ports**.
+
+The sender implements RFC 6295 RTP-MIDI packets with 48 kHz timestamp units and
+no recovery journal. It is sessionless: AppleMIDI invitation/sync handshakes are
+not required, which keeps the Android and YAWN sides self-contained.
 
 # Technical info
 Volna uses the Google oboe library for low latency audio. The GUI is java but all the audio functions are implemented in C++ based on previous work done in my other repositories like

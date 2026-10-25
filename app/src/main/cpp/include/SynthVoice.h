@@ -10,33 +10,10 @@ class SynthVoice  {
 public:
     SynthVoice()
     {
-        this->sampleRate = 8000;
-        this->modulation = 0;
-        this->pwm = 0.5;
-		this->vol1 = 1.0;
-		this->vol2 = 1.0;
-        this->fmod1 = 1.0;
-        this->fmod2 = 1.0;
-        this->fmod3 = 0.0;
-        this->ffreq = 1.0;
-        this->fq = 0.1;
-		this->wt1_idx = 0;
-		this->wt2_idx = 0;
-		lowpass.SetParameters(ffreq, fq);
-		
+        init(8000.0f);
     }
-    SynthVoice(float sampleRate) {
-        this->sampleRate = sampleRate;
-        this->modulation = 0;
-        this->pwm = 0.5;
-        this->fmod1 = 1.0;
-        this->fmod2 = 1.0;
-        this->fmod3 = 0.0;
-        this->ffreq = 1.0;
-        this->fq = 0.1;
-		wt1_idx = 0;
-		wt2_idx = 0;
-		lowpass.SetParameters(ffreq, fq);
+    SynthVoice(float newSampleRate) {
+        init(newSampleRate);
     }
     ~SynthVoice(void) {
 
@@ -44,6 +21,8 @@ public:
     void SetSampleRate(float newSampleRate)
     {
       this->sampleRate = newSampleRate;
+      adsr[0].SetSampleRate((uint32_t)newSampleRate);
+      adsr[1].SetSampleRate((uint32_t)newSampleRate);
     }
 
     void MidiNoteOn(int note, int vel)
@@ -170,7 +149,8 @@ public:
           break;
           case 16: //Osc1Wave
             MidiOsc1Wave(value);
-          case 17: //Osc2Wave  
+          break;
+          case 17: //Osc2Wave
             MidiOsc2Wave(value);
           break;
           case 18: //osc1 attack
@@ -350,9 +330,9 @@ public:
     void MidiMod(uint8_t newmod)
     {
       modulation = newmod/127.0;
-      fmod1 = 1.0-0.1*modulation/127.0;
-      fmod2 = 1.0-0.1*modulation/127.0;
-      fmod3 = 0.5*modulation; 
+      fmod1 = 1.0f - 0.1f*modulation;
+      fmod2 = 1.0f - 0.1f*modulation;
+      fmod3 = 0.5f*modulation;
     }
     void MidiPwm(uint8_t newmod)
     {
@@ -444,11 +424,8 @@ public:
     }
     bool IsPlaying()
     {
-        if(adsr[0].GetState()==ADSR::envState::env_idle && adsr[0].GetState()==ADSR::envState::env_idle)
-        {
-            return false;
-        }
-        return true;
+        return adsr[0].GetState() != ADSR::envState::env_idle ||
+               adsr[1].GetState() != ADSR::envState::env_idle;
     }
 	void SetTet(float tet)
 	{
@@ -459,15 +436,37 @@ public:
 		this->tune = tune;
 	}
 protected:
+    void init(float newSampleRate)
+    {
+        this->sampleRate = newSampleRate;
+        this->modulation = 0.0f;
+        this->pwm = 0.5f;
+        this->vol1 = 1.0f;
+        this->vol2 = 1.0f;
+        this->fmod1 = 1.0f;
+        this->fmod2 = 1.0f;
+        this->fmod3 = 0.0f;
+        this->ffreq = 1.0f;
+        this->fq = 0.0f;
+        this->freq1 = 0.0f;
+        this->freq2 = 0.0f;
+        this->velocity = 0.0f;
+        this->wt1_idx = 0;
+        this->wt2_idx = 0;
+        lowpass.SetParameters(ffreq, fq);
+        adsr[0].SetSampleRate((uint32_t)newSampleRate);
+        adsr[1].SetSampleRate((uint32_t)newSampleRate);
+    }
+
     FloatWaveTableOsc osc[2];
     ADSR adsr[2];
     FloatWaveTableOsc lfo[2];
 	float vol1;
 	float vol2;
-    float sampleRate;
-    float freq1;
-    float freq2;
-    float velocity;
+    float sampleRate = 44100.0f;
+    float freq1 = 0.0f;
+    float freq2 = 0.0f;
+    float velocity = 0.0f;
     float modulation;
     float pwm;
     float fmod1;

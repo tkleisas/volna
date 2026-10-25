@@ -35,6 +35,7 @@ public:
 	void SetDecay(float decay);
 	void SetRelease(float release);
 	void SetSustain(float level);
+	void SetSampleRate(uint32_t newSampleRate);
 	float GetAttack(){return attack;}
 	float GetDecay(){return decay;}
     float GetSustain(){return sustainLevel;}
@@ -141,6 +142,17 @@ inline int ADSR::GetState() {
 inline void ADSR::Reset() {
     state = env_idle;
     output = 0.0;
+}
+
+inline void ADSR::SetSampleRate(uint32_t newSampleRate) {
+    if (newSampleRate == 0) {
+        return;
+    }
+    sampleRate = newSampleRate;
+    SetSustainMidi(midiSustain);
+    SetAttackMidi(midiAttack);
+    SetDecayMidi(midiDecay);
+    SetReleaseMidi(midiRelease);
 }
 
 inline float ADSR::GetOutput() {

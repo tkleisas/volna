@@ -1,0 +1,122 @@
+#pragma once
+
+#include "core/Constants.h"
+
+#include "midi/MidiTypes.h"
+#include "core/ParameterInfo.h"
+#include "util/RtRetireList.h"
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+
+namespace yawn {
+namespace instruments {
+
+using InstrumentParameterInfo = ::yawn::ParameterInfo;
+
+inline float noteToFreq(int note) {
+    return 440.0f * std::pow(2.0f, (note - 69) / 12.0f);
+}
+
+inline float velocityToGain(uint16_t vel16) {
+    return (float)vel16 / 65535.0f;
+}
+
+// Abstract base class for all instruments (synths, samplers, racks).
+// Instruments consume MIDI and produce interleaved stereo audio.
+class Instrument {
+public:
+    virtual ~Instrument() = default;
+
+    virtual void init(double sampleRate, int maxBlockSize) = 0;
+    virtual void reset() = 0;
+
+    // Render audio from MIDI input. Output is ADDED to buffer (interleaved stereo).
+    virtual void process(float* buffer, int numFrames, int numChannels,
+                         const midi::MidiBuffer& midi) = 0;
+
+    virtual const char* name() const = 0;
+    virtual const char* id()   const = 0;
+
+    virtual int parameterCount() const = 0;
+    virtual const InstrumentParameterInfo& parameterInfo(int index) const = 0;
+    virtual float getParameter(int index) const = 0;
+    virtual void  setParameter(int index, float value) = 0;
+
+    bool bypassed() const { return m_bypassed; }
+    void setBypassed(bool b) { m_bypassed = b; }
+
+    // Name of the preset currently loaded onto this device (empty = none).
+    // Display-only metadata, set by the preset load/save helpers and
+    // persisted with the project so the device strip can show it.
+    const std::string& currentPresetName() const { return m_currentPresetName; }
+    void setCurrentPresetName(const std::string& n) { m_currentPresetName = n; }
+
+    // Sidechain input: set by AudioEngine each buffer cycle.
+    // Points to the interleaved stereo buffer of the source track (or nullptr).
+    void setSidechainInput(const float* buffer) { m_sidechainBuffer = buffer; }
+    const float* sidechainInput() const { return m_sidechainBuffer; }
+    virtual bool supportsSidechain() const { return false; }
+
+    // Retire list for cross-thread buffer swaps (see util/RtRetireList.h).
+    // Injected by AudioEngine::setInstrument before init. Instruments
+    // that swap sample data live (Sampler, GranularSynth, Multisampler,
+    // DrumRack, Vocoder) park the old buffer here so the audio thread's
+    // in-flight block can finish on it. Instruments holding sub-devices
+    // (InstrumentRack, DrumRack) override to forward the pointer.
+    virtual void setRetireList(util::RtRetireList* rl) { m_retireList = rl; }
+
+protected:
+    // Park a swapped-out object for deferred destruction. Immediate
+    // when no retire list is set (unit tests, single-threaded use).
+    template <typename T>
+    void retireObject(std::unique_ptr<T> obj) {
+        if (m_retireList) m_retireList->retire(std::move(obj));
+    }
+    template <typename T>
+    void retireObject(std::shared_ptr<T> obj) {
+        if (m_retireList) m_retireList->retire(std::move(obj));
+    }
+
+public:
+    // ── Preset extra state ──────────────────────────────────────────
+    // Optional hook for instrument-specific state that lives outside
+    // the parameter list (e.g. Multisampler zones, DrumRack pads,
+    // Sampler buffer). The implementation may write supporting binary
+    // files (typically WAVs) into `assetDir` and store paths-relative-
+    // to-assetDir inside the returned JSON. Default: no extra state
+    // (used by purely parametric synths — Subtractive, Wavetable, FM,
+    // …, where everything is captured by serializeDeviceParams).
+    //
+    // Lifecycle:
+    //   * saveExtraState  — called by saveDevicePreset right before
+    //     the JSON is written. assetDir is created on demand by the
+    //     caller; remove existing files yourself if overwrite-cleanup
+    //     matters for your data layout.
+    //   * loadExtraState  — called by loadDevicePreset after the
+    //     parameter table has been deserialised. assetDir is the
+    //     same folder save wrote into; read the supporting files
+    //     from there.
+    virtual nlohmann::json saveExtraState(
+            const std::filesystem::path& assetDir) const {
+        (void)assetDir;
+        return {};
+    }
+    virtual void loadExtraState(const nlohmann::json& state,
+                                 const std::filesystem::path& assetDir) {
+        (void)state; (void)assetDir;
+    }
+
+protected:
+    double m_sampleRate   = kDefaultSampleRate;
+    int    m_maxBlockSize = 256;
+    bool   m_bypassed     = false;
+    const float* m_sidechainBuffer = nullptr;
+    std::string m_currentPresetName;
+    util::RtRetireList* m_retireList = nullptr;
+};
+
+} // namespace instruments
+} // namespace yawn

@@ -24,13 +24,46 @@ add_library( # Sets the name of the library.
 
              # Provides a relative path to your source file(s).
         wavesynth-lib.cpp
+        YawnEngine.cpp
         ./src/AD.cpp
         ./src/ADSR.cpp)
+
+# Portable YAWN DSP subset (instruments, MIDI effects, audio effects).
+add_library(yawn_dsp STATIC
+        yawn_dsp/src/instruments/WavetableSynth.cpp
+        yawn_dsp/src/instruments/SubtractiveSynth.cpp
+        yawn_dsp/src/effects/Delay.cpp
+        yawn_dsp/src/effects/Chorus.cpp
+        yawn_dsp/src/effects/Reverb.cpp
+        yawn_dsp/src/effects/PlateReverb.cpp
+        yawn_dsp/src/effects/Filter.cpp
+        yawn_dsp/src/effects/Distortion.cpp
+        yawn_dsp/src/effects/EQ.cpp
+        yawn_dsp/src/effects/Compressor.cpp
+        yawn_dsp/src/effects/Limiter.cpp
+        yawn_dsp/src/midi/Arpeggiator.cpp
+        yawn_dsp/src/midi/Chord.cpp
+        yawn_dsp/src/midi/Scale.cpp
+        yawn_dsp/src/midi/NoteLength.cpp
+        yawn_dsp/src/midi/VelocityEffect.cpp
+        yawn_dsp/src/midi/MidiRandom.cpp
+        yawn_dsp/src/midi/MidiPitch.cpp
+        yawn_dsp/src/midi/LFO.cpp)
+
+set_target_properties(yawn_dsp PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON)
+
+target_include_directories(yawn_dsp PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/yawn_dsp/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/yawn_dsp/third_party)
 
 # Add include directories
 target_include_directories(wavesynth-lib PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/yawn_dsp/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/yawn_dsp/third_party)
 
 # Searches for a specified prebuilt library and stores the path as a
 # variable. Because CMake includes system libraries in the search path by
@@ -52,6 +85,7 @@ find_library( # Sets the name of the path variable.
 target_link_libraries( # Specifies the target library.
                        wavesynth-lib
                         oboe
+                        yawn_dsp
                        # Links the target library to the log library
                        # included in the NDK.
                        ${log-lib} )

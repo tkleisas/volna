@@ -36,9 +36,10 @@ public:
     }
     ~FloatWaveTableOsc(void) {
         for (int idx = 0; idx < numWaveTableSlots; idx++) {
-            float *temp = mWaveTables[idx].waveTable;
-            if (temp != 0)
-                delete [] temp;
+            if (mWaveTables[idx].owned) {
+                delete [] mWaveTables[idx].waveTable;
+            }
+            mWaveTables[idx].waveTable = nullptr;
         }
     }
 
@@ -99,13 +100,20 @@ public:
     //
     float GetOutput(void) {
         waveTable *waveTable = &mWaveTables[mCurWaveTable];
+        const int32_t len = waveTable->waveTableLen;
+        if (waveTable->waveTable == nullptr || len <= 0) {
+            return 0.0f;
+        }
 
-        // linear interpolation
-        float temp = mPhasor *  (waveTable->waveTableLen);
-        int32_t intPart = floor(temp);
-        float fracPart = temp - intPart;
-        float samp0 = (waveTable->waveTable[intPart]);
-        float samp1 = (waveTable->waveTable[intPart + 1]);
+        // linear interpolation with wraparound
+        float temp = mPhasor * len;
+        int32_t intPart = static_cast<int32_t>(temp);
+        if (intPart >= len) intPart -= len;
+        int32_t nextPart = intPart + 1;
+        if (nextPart >= len) nextPart = 0;
+        const float fracPart = temp - static_cast<float>(intPart);
+        const float samp0 = waveTable->waveTable[intPart];
+        const float samp1 = waveTable->waveTable[nextPart];
         return samp0 + (samp1 - samp0) * fracPart;
     }
 
@@ -119,27 +127,34 @@ public:
     //
     float GetOutputMinusOffset() {
         waveTable *waveTable = &mWaveTables[mCurWaveTable];
-        float len = waveTable->waveTableLen;
+        const int32_t len = waveTable->waveTableLen;
         float *wave = waveTable->waveTable;
-
-
+        if (wave == nullptr || len <= 0) {
+            return 0.0f;
+        }
 
         float temp = mPhasor * len;
-        int32_t intPart = floor(temp);
-        float fracPart = temp - intPart;
-        float samp0 = (wave[intPart]);
-        float samp1 = (wave[intPart+ 1]);
-        float samp = samp0 + (samp1 - samp0) * fracPart;
+        int32_t intPart = static_cast<int32_t>(temp);
+        if (intPart >= len) intPart -= len;
+        int32_t nextPart = intPart + 1;
+        if (nextPart >= len) nextPart = 0;
+        float fracPart = temp - static_cast<float>(intPart);
+        float samp0 = wave[intPart];
+        float samp1 = wave[nextPart];
+        const float samp = samp0 + (samp1 - samp0) * fracPart;
 
         // and linear again for the offset part
         float offsetPhasor = mPhasor + mPhaseOfs;
-        if (offsetPhasor > 1.0)
-            offsetPhasor -= 1.0;
+        if (offsetPhasor >= 1.0f)
+            offsetPhasor -= 1.0f;
         temp = offsetPhasor * len;
-        intPart = temp;
-        fracPart = temp - intPart;
+        intPart = static_cast<int32_t>(temp);
+        if (intPart >= len) intPart -= len;
+        nextPart = intPart + 1;
+        if (nextPart >= len) nextPart = 0;
+        fracPart = temp - static_cast<float>(intPart);
         samp0 = wave[intPart];
-        samp1 = wave[intPart+1];
+        samp1 = wave[nextPart];
         return samp - (samp0 + (samp1 - samp0) * fracPart);
     }
 
@@ -154,13 +169,15 @@ public:
     
 
     int AddSharedWaveTable(int32_t len, float *waveTableIn) {
+        if (len <= 0 || waveTableIn == nullptr) {
+            return mNumWaveTables;
+        }
         if (mNumWaveTables < numWaveTableSlots) {
             mWaveTables[mNumWaveTables].waveTable = waveTableIn;
-            mWaveTables[mNumWaveTables].waveTableLen = len-1;
+            mWaveTables[mNumWaveTables].waveTableLen = len;
+            mWaveTables[mNumWaveTables].owned = false;
             
             ++mNumWaveTables;
-
-            
 
             return 0;
         }
@@ -168,16 +185,19 @@ public:
     }
 
     int AddWaveTable(int32_t len, float *waveTableIn) {
+        if (len <= 0 || waveTableIn == nullptr) {
+            return mNumWaveTables;
+        }
         if (mNumWaveTables < numWaveTableSlots) {
-            float *waveTable = mWaveTables[mNumWaveTables].waveTable = new float[len + 1];
+            float *waveTable = mWaveTables[mNumWaveTables].waveTable = new float[len];
             mWaveTables[mNumWaveTables].waveTableLen = len;
+            mWaveTables[mNumWaveTables].owned = true;
             
             ++mNumWaveTables;
 
             // fill in wave
             for (long idx = 0; idx < len; idx++)
                 waveTable[idx] = waveTableIn[idx];
-            waveTable[len] = waveTable[0];  // duplicate for interpolation wraparound
 
             return 0;
         }
@@ -190,7 +210,11 @@ public:
     }
     void SetWaveTable(int waveTableIdx)
     {
-      this->mCurWaveTable = waveTableIdx%mNumWaveTables;
+      if (mNumWaveTables <= 0) {
+        mCurWaveTable = 0;
+        return;
+      }
+      this->mCurWaveTable = waveTableIdx % mNumWaveTables;
     }
     int GetWaveTableCount()
     {
@@ -205,9 +229,9 @@ protected:
     int32_t mCurWaveTable = 0;      // current table, based on current frequency
     int32_t mNumWaveTables = 0;     // number of wavetable slots in use
     struct waveTable {
-      
-        int32_t waveTableLen;
-        float *waveTable;
+        int32_t waveTableLen = 0;
+        float *waveTable = nullptr;
+        bool owned = false;
     };
     static constexpr int numWaveTableSlots = 256;    // simplify allocation with reasonable maximum
     waveTable mWaveTables[numWaveTableSlots];
