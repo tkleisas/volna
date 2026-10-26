@@ -60,11 +60,55 @@
                 android:layout_height="20dp"
 
                 />
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Performance"
+                android:tag="section" />
+
+<TextView
+                android:id="@+id/gridSizeText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="20sp"
+                android:text="Grid size: 160 px per note" />
+
+            <SeekBar
+                android:id="@+id/gridSizeSeekBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="8"
+                android:max="300"/>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="12dp" />
+
+            <TextView
+                android:id="@+id/dspLoadText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:textColor="#00ff00"
+                android:text="DSP: --" />
+
+            <Button
+                android:id="@+id/resetDspPeakButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Reset DSP peak" />
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="12dp" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="24sp"
-                android:text="Sound engine" />
+                android:text="Sound engine"
+                android:tag="section" />
 
             <Spinner
                 android:id="@+id/engineSpinner"
@@ -77,7 +121,14 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
 
-            <TextView
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Appearance"
+                android:tag="section_collapsed" />
+
+<TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="20sp"
@@ -90,7 +141,14 @@
                 android:layout_height="wrap_content"
                 android:text="RED"
                 />
-            <TextView
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Tuning"
+                android:tag="section" />
+
+<TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="20sp"
@@ -243,7 +301,14 @@
                 android:layout_height="wrap_content"
                 android:text="Legato"
                 />
-            <TextView
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Classic oscillator"
+                android:tag="section_collapsed" />
+
+<TextView
                 android:id="@+id/osc1AttackText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -488,7 +553,14 @@
                 android:layout_height="20dp"
 
                 />
-            <TextView
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="Legacy delay"
+                android:tag="section_collapsed" />
+
+<TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="20sp"
@@ -536,19 +608,6 @@
                 android:layout_height="20dp"
 
                 />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Grid size" />
-
-            <SeekBar
-                android:id="@+id/gridSizeSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="8"
-                android:max="300"/>
-
             <Space
                 android:layout_width="match_parent"
                 android:layout_height="20dp"
@@ -558,7 +617,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="24sp"
-                android:text="Wavetable bank" />
+                android:text="Wavetable bank"
+                android:tag="section_collapsed" />
 
             <TextView
                 android:id="@+id/customWavetableText"
@@ -586,7 +646,14 @@
                 android:layout_height="20dp"
 
                 />
-            <TextView
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="MIDI devices"
+                android:tag="section_collapsed" />
+
+<TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="20sp"
@@ -619,7 +686,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="20dp"
                 />
-            <TextView
+                        <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="24sp"
+                android:text="RTP-MIDI"
+                android:tag="section_collapsed" />
+
+<TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="24sp"

@@ -4,6 +4,7 @@
 #include <oboe/Oboe.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 
@@ -52,10 +53,14 @@ public:
         SetupRampDown(0.0f, 1.0f, 40);
         SetStartTrim(100);
         SetEndTrim(250);
+        audioSuspended.store(false);
+        dspLoad.store(0.0f);
+        dspPeak.store(0.0f);
         oboeInit();
     }
 
     void shutdown() {
+        audioSuspended.store(false);
         if (outStream) {
             outStream.reset();
         }
@@ -72,21 +77,36 @@ public:
     }
 
     void pauseAudio() {
+        audioSuspended.store(true);
         if (outStream) {
             outStream->requestStop();
         }
     }
 
     void resumeAudio() {
+        audioSuspended.store(false);
         if (!outStream) {
             oboeInit();
             return;
         }
         const oboe::StreamState state = outStream->getState();
-        if (state == oboe::StreamState::Stopped ||
-            state == oboe::StreamState::Paused ||
-            state == oboe::StreamState::Open) {
-            outStream->requestStart();
+        switch (state) {
+            case oboe::StreamState::Closed:
+            case oboe::StreamState::Closing:
+            case oboe::StreamState::Disconnected:
+            case oboe::StreamState::Uninitialized:
+            case oboe::StreamState::Unknown:
+            case oboe::StreamState::Pausing:
+            case oboe::StreamState::Stopping:
+                oboeInit();
+                break;
+            case oboe::StreamState::Stopped:
+            case oboe::StreamState::Paused:
+            case oboe::StreamState::Open:
+                outStream->requestStart();
+                break;
+            default:
+                break;
         }
     }
 
@@ -115,6 +135,9 @@ public:
     }
 
     void oboeInit() {
+        if (outStream) {
+            outStream.reset();
+        }
         oboe::AudioStreamBuilder builder;
         builder.setSharingMode(oboe::SharingMode::Exclusive)
             ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
@@ -137,12 +160,18 @@ public:
 
     void onErrorAfterClose(oboe::AudioStream* /* oboeStream */,
                            oboe::Result /* error */) override {
-        oboeInit();
+        if (!audioSuspended.load()) {
+            oboeInit();
+        }
     }
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* /* oboeStream */,
                                           void* audioData,
                                           int32_t numFrames) override {
+        if (numFrames <= 0) {
+            return oboe::DataCallbackResult::Continue;
+        }
+        const auto callbackStart = std::chrono::steady_clock::now();
         float* floatData = static_cast<float*>(audioData);
         processEvents();
 
@@ -161,6 +190,19 @@ public:
 
             if (recording) {
                 recordSample(sampleValue);
+            }
+        }
+        const double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - callbackStart).count();
+        const double budget = static_cast<double>(numFrames) /
+                              static_cast<double>(sampleRate);
+        if (budget > 0.0) {
+            const float instant = static_cast<float>(elapsed / budget);
+            const float previous = dspLoad.load(std::memory_order_relaxed);
+            dspLoad.store(previous * 0.8f + instant * 0.2f,
+                          std::memory_order_relaxed);
+            if (instant > dspPeak.load(std::memory_order_relaxed)) {
+                dspPeak.store(instant, std::memory_order_relaxed);
             }
         }
         return oboe::DataCallbackResult::Continue;
@@ -212,6 +254,15 @@ public:
         event.a = static_cast<uint8_t>(oldNote);
         event.b = static_cast<uint8_t>(newNote);
         event.c = static_cast<uint8_t>(velocity);
+        pushEvent(event);
+    }
+
+    void handleNotePitch(int channel, int note, float bendSemitones) {
+        EngineEvent event;
+        event.type = EngineEvent::Type::NotePitch;
+        event.channel = static_cast<uint8_t>(channel);
+        event.a = static_cast<uint8_t>(note);
+        event.f = bendSemitones;
         pushEvent(event);
     }
 
@@ -313,6 +364,10 @@ public:
         return wavedata;
     }
 
+    float getDspLoad() const { return dspLoad.load(std::memory_order_relaxed); }
+    float getDspPeak() const { return dspPeak.load(std::memory_order_relaxed); }
+    void resetDspPeak() { dspPeak.store(0.0f, std::memory_order_relaxed); }
+
     void SetPlay(bool flag) {
         EngineEvent event;
         event.type = EngineEvent::Type::SetPlay;
@@ -412,6 +467,9 @@ private:
                 break;
             case EngineEvent::Type::NoteOff:
                 doNoteOff(event.channel, event.a, event.b);
+                break;
+            case EngineEvent::Type::NotePitch:
+                doNotePitch(event.channel, event.a, event.f);
                 break;
             case EngineEvent::Type::NoteTransition:
                 doNoteTransition(event.channel, event.a, event.b, event.c);
@@ -530,6 +588,14 @@ private:
             if (voices_notes[i] == note) {
                 voices_notes[i] = -1;
                 mSynthVoice[i].MidiNoteOff();
+            }
+        }
+    }
+
+    void doNotePitch(uint8_t /* channel */, uint8_t note, float bendSemitones) {
+        for (int i = 0; i < numvoices; i++) {
+            if (voices_notes[i] == note) {
+                mSynthVoice[i].SetNoteBend(bendSemitones);
             }
         }
     }
@@ -694,6 +760,9 @@ private:
     std::atomic<uint8_t> osc1Wave{0};
     std::atomic<uint8_t> osc2Wave{0};
     oboe::ManagedStream outStream;
+    std::atomic<bool> audioSuspended{false};
+    std::atomic<float> dspLoad{0.0f};
+    std::atomic<float> dspPeak{0.0f};
     int kChannelCount = 2;
     int sampleRate = 48000;
     float wavedata[256] = {};

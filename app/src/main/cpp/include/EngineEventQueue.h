@@ -10,6 +10,7 @@ struct EngineEvent {
     enum class Type : uint8_t {
         NoteOn,
         NoteOff,
+        NotePitch,
         NoteTransition,
         NoteSpread,
         PitchBend,

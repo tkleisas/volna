@@ -17,6 +17,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.SparseArray;
+import android.view.Gravity;
+import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
@@ -27,6 +30,7 @@ import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -45,6 +49,8 @@ import org.bokontep.midi.MidiTools;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
@@ -114,8 +120,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView customWavetableText;
     private Spinner engineSpinner;
     private LinearLayout yawnControls;
-    private int midiFxIndex = 0;
-    private int audioFxIndex = 0;
+    private CollapsibleSection midiFxSection;
+    private CollapsibleSection audioFxSection;
     private float yawnTempo = 120.0f;
     private float yawnMasterVolume = 0.8f;
 
@@ -159,6 +165,9 @@ public class MainActivity extends AppCompatActivity {
     private SeekBar delayTimeSeekBar;
     private SeekBar delayFeedbackSeekBar;
     private SeekBar gridSizeSeekBar;
+    private TextView gridSizeTextView;
+    private TextView dspLoadText;
+    private int dspUiCounter;
     private TextView tuneTextView;
     private TextView tetTextView;
     private TextView octaveFactorTextView;
@@ -189,10 +198,22 @@ public class MainActivity extends AppCompatActivity {
     private int rootNote = 36;
     private int xNoteScale = 160;
     private int currentScale = 0;
-    private volatile int[] notemap = new int[10];
-    //private HashMap<Integer, Integer> notemap = new HashMap<>();
+    private MicrotonalPitchMapper pitchMapper;
+    private MpeChannelAllocator mpeChannelAllocator;
+    private final SparseArray<TouchVoice> touchVoices = new SparseArray<>();
+    private static final String PREF_YAWN_STATE = "yawnStateV1";
+
     private AppPreferences prefs;
     private SynthEngine engine;
+    private final Runnable saveSynthStateRunnable = this::saveSynthStateNow;
+    private boolean resumed;
+    private final Runnable audioResumeRetry = () -> {
+        if (resumed && engine != null) {
+            engine.resumeAudio();
+        }
+    };
+    private Boolean pressureSupported;
+    private Boolean sizeSupported;
     private String[] rootNotes =
             {
                     "C0(0)", "C#0(1)", "D0(2)", "D#0(3)", "E0(4)", "F0(5)", "F#0(6)", "G0(7)", "G#0(8)", "A0(9)", "A#0(10)", "B0(11)",
@@ -231,10 +252,6 @@ public class MainActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         super.onCreate(savedInstanceState);
-        for (int i=0;i<notemap.length;i++)
-        {
-            notemap[i]= -1;
-        }
 
         prefs = new AppPreferences(this);
         engine = new SynthEngine(this, 44100);
@@ -289,6 +306,9 @@ public class MainActivity extends AppCompatActivity {
         engine.sendMidiCC(0, 16, osc1Wave);
         engine.sendMidiCC(0, 17, osc2Wave);
         rootNoteStr = this.midiNoteToString(rootNote);
+        mpeChannelAllocator = new MpeChannelAllocator();
+        updatePitchMapper();
+        restoreSynthState();
 
         setContentView(R.layout.activity_main);
         paint = new Paint();
@@ -312,8 +332,12 @@ public class MainActivity extends AppCompatActivity {
                 if (position == engine.getEngineMode()) {
                     return;
                 }
+                saveSynthStateNow();
                 engine.switchEngine(position);
                 prefs.writeInt("engineMode", position);
+                if (position != SynthEngine.ENGINE_LEGACY) {
+                    restoreSynthState();
+                }
                 rebuildYawnControls();
                 updateWavetableViews();
                 if (wavetableStore.hasStoredWavetable()) {
@@ -327,6 +351,7 @@ public class MainActivity extends AppCompatActivity {
         });
         yawnControls = (LinearLayout) findViewById(R.id.yawnControls);
         rebuildYawnControls();
+        installCollapsibleXmlSections();
         redToggleButton = (ToggleButton) findViewById(R.id.redToggleButton);
         redToggleButton.setOnCheckedChangeListener(
                 new CompoundButton.OnCheckedChangeListener() {
@@ -358,9 +383,9 @@ public class MainActivity extends AppCompatActivity {
         );
 
         scope = findViewById(R.id.mscope);
-        scope.setText(rootNoteStr + " " + scaleNames[currentScale]);
         scope.setXNoteScale(xNoteScale);
         scope.setRed(red);
+        updateScopeText();
         rootNoteSpinner = (Spinner) findViewById(R.id.rootNoteSpinner);
         final ArrayAdapter<String> rootNoteAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, rootNotes);
 
@@ -394,6 +419,7 @@ public class MainActivity extends AppCompatActivity {
                         if (position >= 0 && position < scaleAdapter.getCount()) {
                             currentScale = position;
                             prefs.writeInt("currentScale", currentScale);
+                            updatePitchMapper();
                         }
                     }
 
@@ -435,6 +461,17 @@ public class MainActivity extends AppCompatActivity {
         this.maxSpreadSeekBar.setProgress(this.maxSpread);
         this.gridSizeSeekBar = (SeekBar) findViewById(R.id.gridSizeSeekBar);
         this.gridSizeSeekBar.setProgress(this.xNoteScale);
+        this.gridSizeTextView = (TextView) findViewById(R.id.gridSizeText);
+        updateGridSizeLabel();
+        this.dspLoadText = (TextView) findViewById(R.id.dspLoadText);
+        findViewById(R.id.resetDspPeakButton).setOnClickListener(v -> {
+            if (engine != null) {
+                engine.resetDspPeak();
+            }
+            if (dspLoadText != null) {
+                dspLoadText.setText("DSP: --");
+            }
+        });
         this.osc1WaveSeekBar = (SeekBar) findViewById(R.id.osc1WaveSeekBar);
         this.osc1WaveSeekBar.setProgress(osc1Wave);
         this.osc2WaveSeekBar = (SeekBar) findViewById(R.id.osc2WaveSeekBar);
@@ -515,6 +552,7 @@ public class MainActivity extends AppCompatActivity {
                                 lowOffset = 0;
                             }
                             prefs.writeInt("lowOffset",lowOffset);
+                            updatePitchMapper();
                         }
                         catch (Exception e)
                         {
@@ -544,6 +582,7 @@ public class MainActivity extends AppCompatActivity {
                                 midOffset = 0;
                             }
                             prefs.writeInt("midOffset",midOffset);
+                            updatePitchMapper();
                         }
                         catch (Exception e)
                         {
@@ -572,6 +611,7 @@ public class MainActivity extends AppCompatActivity {
                         highOffset = 0;
                     }
                     prefs.writeInt("highOffset",highOffset);
+                    updatePitchMapper();
                 }
                 catch (Exception e)
                 {
@@ -591,16 +631,19 @@ public class MainActivity extends AppCompatActivity {
                     tuneTextView.setText("A frequency (Hz):" + tune);
                     engine.setTune(tune);
                     prefs.writeInt("tune", (int) (tune * 10));
+                    updatePitchMapper();
                 } else if (id == R.id.tetSeekBar) {
                     tet = progress;
                     engine.setTet(tet);
                     tetTextView.setText("Tuning Equal Temperament:" + tet);
                     prefs.writeInt("tet", tet);
+                    updatePitchMapper();
                 } else if (id == R.id.octaveFactorSeekBar) {
                     octaveFactor = ((float)progress) / 1000.0f;
                     octaveFactorTextView.setText("Octave factor (default is 2):"+octaveFactor);
                     engine.setOctaveFactor(octaveFactor);
                     prefs.writeInt("octaveFactor",(int)(octaveFactor*1000));
+                    updatePitchMapper();
                 } else if (id == R.id.osc1AttackSeekBar) {
                     engine.setOsc1Attack(progress);
                     osc1AttackTextView.setText("osc1Attack:" + engine.getOsc1Attack());
@@ -684,6 +727,8 @@ public class MainActivity extends AppCompatActivity {
                     prefs.writeInt("xNoteScale", xNoteScale);
                     scope.setXNoteScale(xNoteScale);
                     scope.invalidate();
+                    updateGridSizeLabel();
+                    updatePitchMapper();
                 }
             }
 
@@ -820,7 +865,7 @@ public class MainActivity extends AppCompatActivity {
                 }*/
                 scope.setData(engine.getWaveform());
                 scope.setMidilog(getNoteMap());
-
+                updateDspMeter();
                 scope.invalidate();
                 mHandler.postDelayed(screenUpdater, updateInterval);
             }
@@ -866,34 +911,6 @@ public class MainActivity extends AppCompatActivity {
         return "";
     }
 
-    public int transformNote(int noteIn) {
-        if (tet != 12) {
-            return noteIn % (11*tet);
-        }
-        int notesInScale = scales[currentScale * 13];
-        int relnote = noteIn - rootNote;
-        int octave = relnote / notesInScale;
-        int noteInScale = relnote % notesInScale;
-        int index = currentScale * 13 + 1 + noteInScale;
-        int noteOut = -1;
-        if (scales == null) {
-            return 0;
-        }
-        if (index < scales.length && index >= 0) {
-            noteOut = this.rootNote + scales[index] + octave * tet;
-        } else {
-            while (index >= scales.length) {
-                index = index - tet;
-            }
-            if (index < 0) {
-                index = 0;
-            }
-            noteOut = this.rootNote + scales[index] + octave * tet;
-        }
-
-        return noteOut % 128;
-    }
-
     public void applySettings() {
         String rootNote = (String) rootNoteSpinner.getSelectedItem();
         int note = 0;
@@ -933,250 +950,379 @@ public class MainActivity extends AppCompatActivity {
             this.rootNote = 12 * octave + note;
             rootNoteStr = midiNoteToString(this.rootNote);
             prefs.writeInt("rootNote", this.rootNote);
-
+            updatePitchMapper();
         }
     }
 
     String getNoteMap() {
         StringBuilder s = new StringBuilder();
-        try {
-
-
-            if (notemap == null) {
-                return "";
-            }
-            for (int i = 0; i < notemap.length; i++) {
-                if(notemap[i]>=0) {
-                    s.append(i);
-                    s.append(":");
-                    s.append(notemap[i]);
-                    s.append(" ");
-                }
-            }
-        }
-        catch (Exception e)
-        {
-
+        for (int i = 0; i < touchVoices.size(); i++) {
+            s.append(touchVoices.keyAt(i)).append(':')
+                    .append(touchVoices.valueAt(i).anchorNote).append(' ');
         }
         return s.toString();
     }
+
+    private void scheduleSaveSynthState() {
+        if (mHandler == null) {
+            return;
+        }
+        mHandler.removeCallbacks(saveSynthStateRunnable);
+        mHandler.postDelayed(saveSynthStateRunnable, 500);
+    }
+
+    private void saveSynthStateNow() {
+        if (engine == null || prefs == null ||
+                engine.getEngineMode() == SynthEngine.ENGINE_LEGACY) {
+            return;
+        }
+        String state = engine.saveYawnState();
+        if (state != null) {
+            prefs.writeString(PREF_YAWN_STATE, state);
+        }
+    }
+
+    private void restoreSynthState() {
+        if (engine == null || prefs == null ||
+                engine.getEngineMode() == SynthEngine.ENGINE_LEGACY) {
+            return;
+        }
+        String state = prefs.readString(PREF_YAWN_STATE, "");
+        if (state == null || state.isEmpty()) {
+            return;
+        }
+        String error = engine.restoreYawnState(state);
+        if (error != null) {
+            prefs.writeString(PREF_YAWN_STATE, "");
+            return;
+        }
+        yawnTempo = engine.getYawnTempo();
+        yawnMasterVolume = engine.getYawnMasterVolume();
+        prefs.writeInt("yawnTempo", (int) (yawnTempo * 10));
+        prefs.writeInt("yawnMasterVolume", (int) (yawnMasterVolume * 1000));
+    }
+
+    private void updateDspMeter() {
+        if (dspLoadText == null || engine == null) {
+            return;
+        }
+        if ((dspUiCounter++ % 5) != 0) {
+            return;
+        }
+        float load = engine.getDspLoad() * 100.0f;
+        float peak = engine.getDspPeak() * 100.0f;
+        dspLoadText.setText(String.format(Locale.US,
+                "DSP: %.1f%% (peak %.1f%%)", load, peak));
+        if (load > 80.0f) {
+            dspLoadText.setTextColor(Color.RED);
+        } else if (load > 60.0f) {
+            dspLoadText.setTextColor(Color.rgb(255, 165, 0));
+        } else {
+            dspLoadText.setTextColor(Color.GREEN);
+        }
+    }
+
+    private void updateGridSizeLabel() {
+        if (gridSizeTextView != null) {
+            gridSizeTextView.setText("Grid size: " + xNoteScale + " px per note");
+        }
+    }
+
+    private void updatePitchMapper() {
+        int[] scaleRow = new int[13];
+        System.arraycopy(scales, currentScale * 13, scaleRow, 0, 13);
+        pitchMapper = new MicrotonalPitchMapper(rootNote, scaleRow, tet, tune,
+                octaveFactor, xNoteScale);
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        int[] activeIds = new int[10];
-        boolean actionMove = false;
-        for(int i=0;i<activeIds.length;i++)
-        {
-            activeIds[i]=-1;
+        if (engine != null) {
+            engine.resumeAudio();
         }
-        lastTouchEventTime = new java.util.Date().getTime();
-        int action = event.getActionMasked();
-        int index = event.getActionIndex();
+        lastTouchEventTime = System.currentTimeMillis();
+        final float height = touchSurfaceHeight();
+        if (pitchMapper == null) {
+            updatePitchMapper();
+        }
+        final int action = event.getActionMasked();
+        final int actionIndex = event.getActionIndex();
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_POINTER_DOWN:
+                startTouch(event, actionIndex, height);
+                break;
+            case MotionEvent.ACTION_MOVE:
+                for (int i = 0; i < event.getPointerCount(); i++) {
+                    TouchVoice voice = touchVoices.get(event.getPointerId(i));
+                    if (voice != null) {
+                        updateTouch(voice, event, i, height);
+                    }
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                stopTouch(event.getPointerId(actionIndex), true);
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                stopAllTouches(true);
+                break;
+            default:
+                break;
+        }
+        touchPoints = touchVoices.size();
+        updateScopeText();
+        return true;
+    }
+
+    private float touchSurfaceHeight() {
         float height = getWindow().getDecorView().getHeight();
         if (height <= 0) {
             height = getResources().getDisplayMetrics().heightPixels;
         }
-        int activepointers = event.getPointerCount() % 10; // do not track more than 10
-        touchPoints = activepointers;
+        return height;
+    }
 
-        float[] x = new float[10];
-        float[] y = new float[10];
-        for (int i = 0; i < 10; i++) {
-            if (i < activepointers) {
-                x[i] = event.getX(i);
-                y[i] = event.getY(i);
-            } else {
-                x[i] = -1;
-                y[i] = -1;
-            }
+    private int zoneOffset(float y, float height) {
+        if (y > 2.0f * height / 3.0f) {
+            return lowOffset;
+        }
+        if (y < height / 3.0f) {
+            return highOffset;
+        }
+        return midOffset;
+    }
+
+    private void startTouch(MotionEvent event, int index, float height) {
+        final int id = event.getPointerId(index);
+        if (touchVoices.get(id) != null) {
+            stopTouch(id, false);
+        }
+        final float x = event.getX(index);
+        final float y = event.getY(index);
+        final float expression = rawTouchExpression(event, index);
+        final int velocity = velocityForExpression(expression);
+        final int channel = mpeChannelAllocator.allocate();
+        final MicrotonalPitchMapper.Pitch pitch =
+                pitchMapper.pitchAt(x, zoneOffset(y, height));
+
+        TouchVoice voice = new TouchVoice(id, channel);
+        voice.velocity = velocity;
+        voice.pressure = expression >= 0.0f ? expression : 0.5f;
+        int[] waveforms = waveformsForTouch(y, height);
+        voice.waveform1 = waveforms[0];
+        voice.waveform2 = waveforms[1];
+        MicrotonalVoice.Transition transition = voice.expression.start(pitch);
+        voice.anchorNote = transition.anchorNote;
+        voice.lastSpread = (int) spreadForTouch(x);
+        touchVoices.put(id, voice);
+
+        engine.sendMidiNoteOn(0, transition.noteOn, velocity);
+        midiNoteOn(channel, transition.noteOn, velocity);
+        engine.sendMidiNotePitch(0, transition.noteOn,
+                (float) transition.bendSemitones);
+        midiPitchBend(channel, pitchBend14(transition.bendSemitones));
+        sendTouchPressure(voice);
+        selectWaveformForVoice(voice);
+        scope.setMarker("" + id, x, y);
+        vel = velocity;
+    }
+
+    private void updateTouch(TouchVoice voice, MotionEvent event, int index,
+                             float height) {
+        final float x = event.getX(index);
+        final float y = event.getY(index);
+        final float expression = rawTouchExpression(event, index);
+        final int velocity = velocityForExpression(expression);
+        final MicrotonalPitchMapper.Pitch pitch =
+                pitchMapper.pitchAt(x, zoneOffset(y, height));
+        final MicrotonalVoice.Transition transition =
+                voice.expression.update(pitch, legato);
+
+        if (transition.noteOff >= 0) {
+            engine.sendMidiNoteOff(0, transition.noteOff, 0);
+            midiNoteOff(voice.channel, transition.noteOff, 0);
+        }
+        if (transition.noteOn >= 0) {
+            engine.sendMidiNoteOn(0, transition.noteOn, velocity);
+            midiNoteOn(voice.channel, transition.noteOn, velocity);
         }
 
-        String scopetext = "";
+        voice.anchorNote = transition.anchorNote;
+        voice.velocity = velocity;
+        voice.pressure = TouchExpression.smooth(voice.pressure, expression);
+        engine.sendMidiNotePitch(0, transition.anchorNote,
+                (float) transition.bendSemitones);
+        midiPitchBend(voice.channel,
+                pitchBend14(transition.bendSemitones));
+        sendTouchPressure(voice);
+
+        int[] waveforms = waveformsForTouch(y, height);
+        voice.waveform1 = waveforms[0];
+        voice.waveform2 = waveforms[1];
+        selectWaveformForVoice(voice);
+
+        voice.lastSpread = (int) spreadForTouch(x);
+        engine.sendMidiNoteSpread(0, voice.anchorNote,
+                63 + voice.lastSpread);
+        scope.setMarker("" + voice.pointerId, x, y);
+        vel = velocity;
+    }
+
+    private void stopTouch(int id, boolean unsetMarker) {
+        TouchVoice voice = touchVoices.get(id);
+        if (voice == null) {
+            return;
+        }
+        MicrotonalVoice.Transition transition = voice.expression.stop();
+        if (transition.noteOff >= 0) {
+            engine.sendMidiNoteOff(0, transition.noteOff, 0);
+            midiNoteOff(voice.channel, transition.noteOff, 0);
+        }
+        midiChannelPressure(voice.channel, 0);
+        mpeChannelAllocator.release(voice.channel);
+        touchVoices.remove(id);
+        if (unsetMarker) {
+            scope.unsetMarker("" + id);
+        }
+    }
+
+    private void stopAllTouches(boolean unsetMarkers) {
+        while (touchVoices.size() > 0) {
+            int id = touchVoices.keyAt(0);
+            stopTouch(id, unsetMarkers);
+        }
+        if (mpeChannelAllocator != null) {
+            mpeChannelAllocator.reset();
+        }
+    }
+
+    private void selectWaveformForVoice(TouchVoice voice) {
+        engine.selectWaveform(0, 0, voice.anchorNote, voice.waveform1);
+        engine.selectWaveform(0, 1, voice.anchorNote, voice.waveform2);
+    }
+
+    private int[] waveformsForTouch(float y, float height) {
+        int factor = Math.max(1, (int) height / 3);
+        int wi = (int) y % factor;
+        int w1 = normalizeWave(osc1Wave + (wi * osc1WaveControl) / factor);
+        int w2 = normalizeWave(osc2Wave + (wi * osc2WaveControl) / factor);
+        return new int[] {w1, w2};
+    }
+
+    private static int normalizeWave(int wave) {
+        int value = wave % 256;
+        return value < 0 ? value + 256 : value;
+    }
+
+    private double spreadForTouch(float x) {
+        double withinCell = x % xNoteScale;
+        if (withinCell < 0) {
+            withinCell += xNoteScale;
+        }
+        int oscdist = -((int) (((xNoteScale - withinCell) / xNoteScale) * 127) - 63);
+        return (maxSpread / 127.0) * oscdist;
+    }
+
+    private float rawTouchExpression(MotionEvent event, int index) {
+        final InputDevice device = event.getDevice();
+        if (device != null) {
+            if (pressureSupported == null) {
+                InputDevice.MotionRange range =
+                        device.getMotionRange(MotionEvent.AXIS_PRESSURE);
+                pressureSupported = range != null && range.getRange() > 0.0f;
+            }
+            if (sizeSupported == null) {
+                InputDevice.MotionRange range =
+                        device.getMotionRange(MotionEvent.AXIS_SIZE);
+                sizeSupported = range != null && range.getRange() > 0.0f;
+            }
+        }
+        if (Boolean.TRUE.equals(pressureSupported)) {
+            return Math.max(0.0f, Math.min(1.0f, event.getPressure(index)));
+        }
+        if (Boolean.TRUE.equals(sizeSupported)) {
+            return Math.max(0.0f, Math.min(1.0f, event.getSize(index)));
+        }
+        return -1.0f;
+    }
+
+    private static int velocityForExpression(float expression) {
+        return TouchExpression.velocity(expression);
+    }
+
+    private void sendTouchPressure(TouchVoice voice) {
+        int pressure = TouchExpression.midiPressure(voice.pressure);
+        if (pressure >= 0) {
+            midiChannelPressure(voice.channel, pressure);
+        }
+    }
+
+    private static int pitchBend14(double bendSemitones) {
+        int value = 8192 + (int) Math.round(bendSemitones /
+                MicrotonalPitchMapper.BEND_RANGE_SEMITONES * 8192.0);
+        return Math.max(0, Math.min(16383, value));
+    }
+
+    private void midiPitchBend(int channel, int value14) {
+        midiCommand(MidiConstants.STATUS_PITCH_BEND | channel,
+                value14 & 0x7F, (value14 >> 7) & 0x7F);
+    }
+
+    private void midiChannelPressure(int channel, int pressure) {
+        midiCommand(MidiConstants.STATUS_CHANNEL_PRESSURE | channel,
+                Math.max(0, Math.min(127, pressure)));
+    }
+
+    private void updateScopeText() {
+        StringBuilder text = new StringBuilder();
         if (tet == 12) {
-            scopetext = rootNoteStr + " " + scaleNames[currentScale] + " notes:";
-
+            text.append(rootNoteStr).append(' ')
+                    .append(scaleNames[currentScale]).append(" notes:");
         } else {
-            scopetext = "tet " + tet + " notes:";
+            text.append("tet ").append(tet).append(" notes:");
         }
-
-        int offset = 0;
-
-
-        String showIds = "";
-        for (int i = 0; i < activepointers; i++) {
-
-            if (y[i] > 2.0 * height / 3.0f) {
-                offset = lowOffset;
-            } else if (y[i] < height / 3.0f) {
-                offset = highOffset;
-            } else {
-                offset = midOffset;
+        for (int i = 0; i < touchVoices.size(); i++) {
+            TouchVoice voice = touchVoices.valueAt(i);
+            text.append('[').append(voice.lastSpread).append("] ");
+            double target = voice.expression.currentPitch();
+            int displayNote = Math.max(0, Math.min(127,
+                    (int) Math.round(target)));
+            text.append(noteName(displayNote));
+            double cents = (target - displayNote) * 100.0;
+            if (Math.abs(cents) >= 1.0) {
+                text.append(String.format(Locale.US, "%+.0fc", cents));
             }
-            int id = event.getPointerId(i);
-
-            showIds = showIds+""+id + " ";
-            int oscdist = -((int) (((xNoteScale - x[i] % xNoteScale) / xNoteScale) * 127) - 63);
-            scopetext = scopetext + "[" + oscdist + "]";
-            int midinote = (rootNote + ((int) x[i] / xNoteScale)) % (11*tet);
-            midinote = (transformNote(midinote+offset)  ) % (11*tet);
-            int factor = (int) height / 3;
-            int wi = (int) y[i] % factor;
-
-            int waveform1 = (this.osc1Wave + (wi * this.osc1WaveControl) / factor) % 256;
-            int waveform2 = (this.osc2Wave + (wi * this.osc2WaveControl) / factor) % 256;
-            engine.selectWaveform(0, 0, midinote, waveform1);
-            engine.selectWaveform(0, 1, midinote, waveform2);
-            float pressure = event.getPressure(i);
-            if(pressure<0.25f)
-            {
-                pressure = 0.25f;
-            }
-
-            int tmp = ((int) (127.0 * pressure * 4));
-            vel = tmp > 127 ? 127 : tmp;
-            scopetext = scopetext + " " + midinote;
-            if (vel >= 0) {
-                scopetext = scopetext + "(" + vel + ")";
-            }
-            scope.setMarker("" + id, x[i], y[i]);
-            int last = notemap[id];
-            if (action == MotionEvent.ACTION_DOWN && id==index)  {
-                //scope.printLine("ACTION_DOWN " + id);
-                if(last>=0)
-                {
-                    engine.sendMidiNoteOff(0,last,0);
-                    midiNoteOff(0,last%128,0);
-                    notemap[id] = -1;
-                }
-
-                if(midinote>=0) {
-                    engine.sendMidiNoteOn(0, midinote, vel);
-                    midiNoteOn(0,midinote%128, vel);
-                    engine.selectWaveform(0, 0, midinote, waveform1);
-                    engine.selectWaveform(0, 1, midinote, waveform2);
-
-                    notemap[id] = midinote;
-                }
-
-            }
-            if(action == MotionEvent.ACTION_POINTER_DOWN && id==index)
-            {
-                //scope.printLine("ACTION_PONTER_DOWN " + id );
-                if(last>=0)
-                {
-                    engine.sendMidiNoteOff(0,last,0);
-                    midiNoteOff(0,last%128,0);
-
-                    notemap[id] = -1;
-                }
-
-                if(midinote>=0) {
-                    engine.sendMidiNoteOn(0, midinote, vel);
-                    midiNoteOn(0,midinote%128,vel);
-
-                    engine.selectWaveform(0, 0, midinote, waveform1);
-                    engine.selectWaveform(0, 1, midinote, waveform2);
-
-                    notemap[id] = midinote;
-                }
-            }
-            if (action == MotionEvent.ACTION_MOVE )
-            {
-                actionMove = true;
-                activeIds[i%10]=id;
-                //scope.printLine("ACTION_MOVE");
-                if (midinote >= 0) {
-                    int offset1 = 64 - oscdist;
-                    int offset2 = 64 + oscdist;
-                    if (offset1 < 0 || offset1 > 127) {
-                        offset1 = 0;
-                    }
-                    if (offset2 > 127 || offset2 < 0) {
-                        offset2 = 127;
-                    }
-
-                    engine.selectWaveform(0, 0, midinote, waveform1);
-                    engine.selectWaveform(0, 1, midinote, waveform2);
-
-
-                    if(legato)
-                    {
-                        if(last>=0 && last!=midinote) {
-                            engine.sendMidiChangeNote(0, last, midinote, vel);
-                            midiNoteOn(0,midinote,vel);
-                            midiNoteOff(0,last%127,0);
-
-                        }
-                    }
-                    else {
-                        if(last>=0 && last!=midinote) {
-                            engine.sendMidiNoteOff(0, last, 0);
-
-                            engine.sendMidiNoteOn(0, midinote, vel);
-                            midiNoteOff(0,last%128,0);
-                            midiNoteOn(0,midinote,vel);
-                        }
-                    }
-                    if(last>0 && last==midinote) {
-                        float spreadFactor = (float) (maxSpread / 127.0);
-                        oscdist = (int) (spreadFactor * oscdist);
-                        engine.sendMidiNoteSpread(0, midinote, 63 + oscdist);
-                    }
-
-                    notemap[id]=midinote;
-                    midiPolyAftertouch(0,midinote,vel);
-
-                    midiSendCC(0,id+1,(waveform1>>1)%128);
-
-                }
-
-
-            }
-
-            if (action == MotionEvent.ACTION_POINTER_UP && id==index && id>=0)
-            {
-
-                //scope.printLine("ACTION_POINTER_UP "+id);
-
-
-                engine.sendMidiNoteOff(0, last, 0);
-                engine.sendMidiNoteOff(0, midinote, 0);
-                midiNoteOff(0,last%128,0);
-                midiNoteOff(0,midinote%128,0);
-
-                scope.unsetMarker("" + index);
-                notemap[id]=-1;
-
-
-
-            }
-            if(action == MotionEvent.ACTION_UP )
-            {
-                //scope.printLine("ACTION_UP "+id);
-                for(int n=0;n<notemap.length;n++) {
-                    if(notemap[n]>0)
-                    {
-                        engine.sendMidiNoteOff(0, notemap[n], 0);
-                        midiNoteOff(0,notemap[n]%127,0);
-                    }
-
-                    scope.unsetMarker("" + n);
-                    notemap[n]=-1;
-
-                }
-
-
-
-
-            }
-
+            text.append('(').append(voice.velocity).append(") ");
         }
-        if(legato)
-        {
-            scopetext = scopetext+" L";
+        if (legato) {
+            text.append(" L");
         }
-        scope.setText(scopetext);
+        scope.setText(text.toString());
+    }
 
-        return true;//return super.onTouchEvent(event);
+    private static String noteName(int note) {
+        String[] names = {"C", "C#", "D", "D#", "E", "F",
+                "F#", "G", "G#", "A", "A#", "B"};
+        int clamped = Math.max(0, Math.min(127, note));
+        return names[clamped % 12] + (clamped / 12);
+    }
+
+    private static final class TouchVoice {
+        final int pointerId;
+        final int channel;
+        final MicrotonalVoice expression = new MicrotonalVoice();
+        int velocity;
+        float pressure = 0.5f;
+        int waveform1;
+        int waveform2;
+        int anchorNote;
+        int lastSpread;
+
+        TouchVoice(int pointerId, int channel) {
+            this.pointerId = pointerId;
+            this.channel = channel;
+        }
     }
 
     public void logMidi(byte[] data) {
@@ -1260,10 +1406,6 @@ public class MainActivity extends AppCompatActivity {
     private void midiSendCC(int channel, int cc, int data)
     {
         midiCommand(MidiConstants.STATUS_CONTROL_CHANGE | channel, cc, data);
-    }
-    private void midiPolyAftertouch(int channel, int pitch, int velocity)
-    {
-        midiCommand(MidiConstants.STATUS_POLYPHONIC_AFTERTOUCH | channel, pitch, velocity);
     }
     private void midiCommand(int status, int data1, int data2) {
         mByteBuffer[0] = (byte) status;
@@ -1365,7 +1507,7 @@ public class MainActivity extends AppCompatActivity {
                     rtpMidiPortEditText.getText().toString().trim());
         } catch (NumberFormatException ignored) {
         }
-        rtpMidiClient.start(host, port, (message, error) ->
+        boolean started = rtpMidiClient.start(host, port, (message, error) ->
                 runOnUiThread(() -> {
                     if (rtpMidiStatusText == null) {
                         return;
@@ -1373,6 +1515,28 @@ public class MainActivity extends AppCompatActivity {
                     rtpMidiStatusText.setText(message);
                     rtpMidiStatusText.setTextColor(error ? Color.RED : Color.GREEN);
                 }));
+        if (started) {
+            sendMpeSetup();
+        }
+    }
+
+    /** Tell external MPE receivers our member-channel pitch range. */
+    private void sendMpeSetup() {
+        // Lower zone with 15 member channels (MPE Configuration Message).
+        midiSendCC(0, 101, 0);
+        midiSendCC(0, 100, 6);
+        midiSendCC(0, 6, 15);
+        midiSendCC(0, 101, 127);
+        midiSendCC(0, 100, 127);
+        for (int channel = 1; channel <= 15; channel++) {
+            // Pitch Bend Sensitivity = 48 semitones, 0 cents.
+            midiSendCC(channel, 101, 0);
+            midiSendCC(channel, 100, 0);
+            midiSendCC(channel, 6, 48);
+            midiSendCC(channel, 38, 0);
+            midiSendCC(channel, 101, 127);
+            midiSendCC(channel, 100, 127);
+        }
     }
 
     private void stopRtpMidi() {
@@ -1412,6 +1576,10 @@ public class MainActivity extends AppCompatActivity {
     private void restoreSavedWavetable() {
         if (!wavetableStore.hasStoredWavetable()) {
             customWavetableText.setText("Factory wavetables");
+            if (engine.getEngineMode() == SynthEngine.ENGINE_YAWN_WAVETABLE &&
+                    engine.getYawnInstrumentParamValue(0) > 4.5f) {
+                engine.setYawnInstrumentParam(0, 0.0f);
+            }
             return;
         }
         new Thread(() -> {
@@ -1488,6 +1656,7 @@ public class MainActivity extends AppCompatActivity {
                     + " samples)");
         }
         rebuildYawnControls();
+        scheduleSaveSynthState();
         Toast.makeText(this, "Loaded wavetable: " + table.name,
                 Toast.LENGTH_SHORT).show();
     }
@@ -1515,6 +1684,7 @@ public class MainActivity extends AppCompatActivity {
         if (customWavetableText != null) {
             customWavetableText.setText("Factory wavetables");
         }
+        scheduleSaveSynthState();
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
@@ -1554,154 +1724,355 @@ public class MainActivity extends AppCompatActivity {
         final int mode = engine.getEngineMode();
         if (mode == SynthEngine.ENGINE_LEGACY) {
             yawnControls.setVisibility(View.GONE);
+            midiFxSection = null;
+            audioFxSection = null;
             return;
         }
         yawnControls.setVisibility(View.VISIBLE);
-        addSectionHeader("Instrument: " + engine.getYawnInstrumentName(mode - 1));
+
+        CollapsibleSection instrumentSection = new CollapsibleSection(this,
+                "Instrument: " + engine.getYawnInstrumentName(mode - 1), true);
         int count = engine.getYawnInstrumentParamCount();
         for (int i = 0; i < count; i++) {
             final int index = i;
-            addParamSlider(yawnControls, engine.getYawnInstrumentParamName(i),
+            addParamSlider(instrumentSection.content(),
+                    engine.getYawnInstrumentParamName(i),
                     engine.getYawnInstrumentParamMin(i),
                     engine.getYawnInstrumentParamMax(i),
                     engine.getYawnInstrumentParamValue(i),
                     value -> engine.setYawnInstrumentParam(index, value));
         }
+        yawnControls.addView(instrumentSection.root(),
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        addSectionHeader("Tempo / output");
-        addParamSlider(yawnControls, "Tempo", 20.0f, 300.0f, yawnTempo,
-                value -> {
+        CollapsibleSection tempoSection = new CollapsibleSection(this,
+                "Tempo / output", true);
+        addParamSlider(tempoSection.content(), "Tempo", 20.0f, 300.0f,
+                yawnTempo, value -> {
                     yawnTempo = value;
                     engine.setYawnTempo(value);
                     prefs.writeInt("yawnTempo", (int) (value * 10));
                 });
-        addParamSlider(yawnControls, "Master volume", 0.0f, 2.0f,
+        addParamSlider(tempoSection.content(), "Master volume", 0.0f, 2.0f,
                 yawnMasterVolume, value -> {
                     yawnMasterVolume = value;
                     engine.setYawnMasterVolume(value);
                     prefs.writeInt("yawnMasterVolume", (int) (value * 1000));
                 });
+        yawnControls.addView(tempoSection.root(),
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        addSectionHeader("MIDI effects");
-        addEffectSection(true);
-        addSectionHeader("Audio effects");
-        addEffectSection(false);
+        midiFxSection = new CollapsibleSection(this, "MIDI effects", false);
+        yawnControls.addView(midiFxSection.root(),
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        rebuildEffectChain(true);
+
+        audioFxSection = new CollapsibleSection(this, "Audio effects", false);
+        yawnControls.addView(audioFxSection.root(),
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        rebuildEffectChain(false);
     }
 
-    private void addEffectSection(boolean midi) {
-        final int effectCount = midi ? engine.getYawnMidiEffectCount()
-                : engine.getYawnAudioEffectCount();
-        if (effectCount <= 0) {
+    private void rebuildEffectChain(boolean midi) {
+        CollapsibleSection section = midi ? midiFxSection : audioFxSection;
+        if (section == null || engine == null) {
             return;
         }
-        String[] names = new String[effectCount];
-        for (int i = 0; i < effectCount; i++) {
+        LinearLayout content = section.content();
+        content.removeAllViews();
+        int count = midi ? engine.getYawnMidiChainSize()
+                : engine.getYawnAudioChainSize();
+        section.setTitle((midi ? "MIDI effects" : "Audio effects")
+                + " (" + count + ")");
+        if (count == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("No effects in this chain yet.");
+            content.addView(empty);
+        }
+        for (int slot = 0; slot < count; slot++) {
+            content.addView(buildEffectSlotRow(midi, slot, count));
+            View divider = new View(this);
+            divider.setBackgroundColor(0xFF444444);
+            divider.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+            content.addView(divider);
+        }
+        content.addView(buildAddEffectRow(midi, count));
+    }
+
+    private LinearLayout buildEffectSlotRow(boolean midi, int slot, int count) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(0, dp(8), 0, dp(8));
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        ToggleButton enabled = new ToggleButton(this);
+        enabled.setTextOn("ON");
+        enabled.setTextOff("OFF");
+        enabled.setTextSize(14);
+        enabled.setMinWidth(dp(64));
+        enabled.setMinimumWidth(dp(64));
+        enabled.setMinHeight(dp(48));
+        enabled.setMinimumHeight(dp(48));
+        enabled.setPadding(dp(8), 0, dp(8), 0);
+        boolean bypassed = midi ? engine.isYawnMidiChainBypassed(slot)
+                : engine.isYawnAudioChainBypassed(slot);
+        enabled.setChecked(!bypassed);
+        enabled.setOnCheckedChangeListener((button, checked) -> {
+            if (midi) {
+                engine.setYawnMidiChainBypassed(slot, !checked);
+            } else {
+                engine.setYawnAudioChainBypassed(slot, !checked);
+            }
+            scheduleSaveSynthState();
+        });
+        titleRow.addView(enabled);
+
+        TextView name = new TextView(this);
+        name.setTextSize(18);
+        name.setPadding(12, 0, 12, 0);
+        name.setText((slot + 1) + ". " + (midi
+                ? engine.getYawnMidiChainName(slot)
+                : engine.getYawnAudioChainName(slot)));
+        name.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+        titleRow.addView(name);
+        block.addView(titleRow);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setPadding(0, dp(4), 0, dp(4));
+        Button up = smallButton("Up", slot > 0, () -> {
+            if (midi) {
+                engine.moveYawnMidiEffect(slot, -1);
+            } else {
+                engine.moveYawnAudioEffect(slot, -1);
+            }
+            rebuildEffectChain(midi);
+            scheduleSaveSynthState();
+        });
+        Button down = smallButton("Down", slot < count - 1, () -> {
+            if (midi) {
+                engine.moveYawnMidiEffect(slot, 1);
+            } else {
+                engine.moveYawnAudioEffect(slot, 1);
+            }
+            rebuildEffectChain(midi);
+            scheduleSaveSynthState();
+        });
+        Button remove = smallButton("Remove", true, () -> {
+            if (midi) {
+                engine.removeYawnMidiEffect(slot);
+            } else {
+                engine.removeYawnAudioEffect(slot);
+            }
+            rebuildEffectChain(midi);
+            scheduleSaveSynthState();
+        });
+        LinearLayout params = new LinearLayout(this);
+        params.setOrientation(LinearLayout.VERTICAL);
+        params.setVisibility(View.GONE);
+        Button edit = smallButton("Params", true, () ->
+                params.setVisibility(params.getVisibility() == View.VISIBLE
+                        ? View.GONE : View.VISIBLE));
+        for (Button button : new Button[]{up, down, remove, edit}) {
+            LinearLayout.LayoutParams buttonParams =
+                    new LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+            buttonParams.setMargins(dp(4), 0, dp(4), 0);
+            button.setLayoutParams(buttonParams);
+            controls.addView(button);
+        }
+        block.addView(controls);
+
+        int paramCount = midi ? engine.getYawnMidiChainParamCount(slot)
+                : engine.getYawnAudioChainParamCount(slot);
+        if (paramCount == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("No parameters");
+            params.addView(empty);
+        }
+        for (int i = 0; i < paramCount; i++) {
+            final int parameter = i;
+            String parameterName = midi
+                    ? engine.getYawnMidiChainParamName(slot, i)
+                    : engine.getYawnAudioChainParamName(slot, i);
+            float min = midi ? engine.getYawnMidiChainParamMin(slot, i)
+                    : engine.getYawnAudioChainParamMin(slot, i);
+            float max = midi ? engine.getYawnMidiChainParamMax(slot, i)
+                    : engine.getYawnAudioChainParamMax(slot, i);
+            float value = midi ? engine.getYawnMidiChainParamValue(slot, i)
+                    : engine.getYawnAudioChainParamValue(slot, i);
+            addParamSlider(params, parameterName, min, max, value, v -> {
+                if (midi) {
+                    engine.setYawnMidiChainParam(slot, parameter, v);
+                } else {
+                    engine.setYawnAudioChainParam(slot, parameter, v);
+                }
+            });
+        }
+        block.addView(params);
+        return block;
+    }
+
+    private LinearLayout buildAddEffectRow(boolean midi, int count) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(0, dp(12), 0, 0);
+
+        TextView label = new TextView(this);
+        label.setTextSize(16);
+        label.setPadding(0, dp(8), 0, dp(4));
+        label.setText("Add effect");
+        block.addView(label);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        int typeCount = midi ? engine.getYawnMidiEffectCount()
+                : engine.getYawnAudioEffectCount();
+        String[] names = new String[typeCount];
+        for (int i = 0; i < typeCount; i++) {
             names[i] = midi ? engine.getYawnMidiEffectName(i)
                     : engine.getYawnAudioEffectName(i);
         }
         Spinner spinner = new Spinner(this);
         spinner.setAdapter(new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_dropdown_item, names));
-        int selected = midi ? midiFxIndex : audioFxIndex;
-        selected = Math.max(0, Math.min(effectCount - 1, selected));
-        spinner.setSelection(selected);
-        yawnControls.addView(spinner);
+        spinner.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+        row.addView(spinner);
 
-        ToggleButton enabled = new ToggleButton(this);
-        enabled.setTextOn("Enabled");
-        enabled.setTextOff("Bypassed");
-        boolean bypassed = midi ? engine.isYawnMidiEffectBypassed(selected)
-                : engine.isYawnAudioEffectBypassed(selected);
-        enabled.setChecked(!bypassed);
-        yawnControls.addView(enabled);
-
-        LinearLayout params = new LinearLayout(this);
-        params.setOrientation(LinearLayout.VERTICAL);
-        yawnControls.addView(params);
-
-        final int initial = selected;
-        if (midi) {
-            midiFxIndex = initial;
-        } else {
-            audioFxIndex = initial;
-        }
-        populateEffectParams(midi, initial, params);
-        enabled.setOnCheckedChangeListener((button, checked) -> {
-            int index = midi ? midiFxIndex : audioFxIndex;
-            if (midi) {
-                engine.setYawnMidiEffectBypassed(index, !checked);
+        Button add = new Button(this);
+        add.setText("Add");
+        add.setTextSize(14);
+        add.setMinHeight(dp(48));
+        add.setMinimumHeight(dp(48));
+        add.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        addParams.setMargins(dp(8), 0, 0, 0);
+        add.setLayoutParams(addParams);
+        add.setEnabled(count < (midi ? YawnEngineLimits.MIDI_CHAIN
+                : YawnEngineLimits.AUDIO_CHAIN));
+        add.setOnClickListener(v -> {
+            int type = spinner.getSelectedItemPosition();
+            int slot = midi ? engine.addYawnMidiEffect(type)
+                    : engine.addYawnAudioEffect(type);
+            if (slot < 0) {
+                Toast.makeText(this, "Effect chain is full",
+                        Toast.LENGTH_SHORT).show();
             } else {
-                engine.setYawnAudioEffectBypassed(index, !checked);
+                rebuildEffectChain(midi);
+                scheduleSaveSynthState();
             }
         });
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view,
-                                       int position, long id) {
-                if (midi) {
-                    midiFxIndex = position;
-                } else {
-                    audioFxIndex = position;
-                }
-                boolean fxBypassed = midi
-                        ? engine.isYawnMidiEffectBypassed(position)
-                        : engine.isYawnAudioEffectBypassed(position);
-                enabled.setOnCheckedChangeListener(null);
-                enabled.setChecked(!fxBypassed);
-                enabled.setOnCheckedChangeListener((button, checked) -> {
-                    int index = midi ? midiFxIndex : audioFxIndex;
-                    if (midi) {
-                        engine.setYawnMidiEffectBypassed(index, !checked);
-                    } else {
-                        engine.setYawnAudioEffectBypassed(index, !checked);
-                    }
-                });
-                populateEffectParams(midi, position, params);
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
+        row.addView(add);
+        block.addView(row);
+        return block;
     }
 
-    private void populateEffectParams(boolean midi, int effect, LinearLayout parent) {
-        parent.removeAllViews();
-        int count = midi ? engine.getYawnMidiEffectParamCount(effect)
-                : engine.getYawnAudioEffectParamCount(effect);
-        if (count <= 0) {
-            TextView empty = new TextView(this);
-            empty.setText(midi ? "No MIDI parameters"
-                    : "No effect parameters");
-            parent.addView(empty);
+    private Button smallButton(String text, boolean enabled, Runnable action) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(14);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(dp(48));
+        button.setMinimumHeight(dp(48));
+        button.setPadding(dp(8), dp(8), dp(8), dp(8));
+        button.setEnabled(enabled);
+        button.setOnClickListener(v -> action.run());
+        return button;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private void installCollapsibleXmlSections() {
+        View scroll = findViewById(R.id.optionsScrollView);
+        if (!(scroll instanceof ScrollView)) {
             return;
         }
-        for (int i = 0; i < count; i++) {
-            final int index = i;
-            String name = midi ? engine.getYawnMidiEffectParamName(effect, i)
-                    : engine.getYawnAudioEffectParamName(effect, i);
-            float min = midi ? engine.getYawnMidiEffectParamMin(effect, i)
-                    : engine.getYawnAudioEffectParamMin(effect, i);
-            float max = midi ? engine.getYawnMidiEffectParamMax(effect, i)
-                    : engine.getYawnAudioEffectParamMax(effect, i);
-            float value = midi ? engine.getYawnMidiEffectParamValue(effect, i)
-                    : engine.getYawnAudioEffectParamValue(effect, i);
-            addParamSlider(parent, name, min, max, value, v -> {
-                if (midi) {
-                    engine.setYawnMidiEffectParam(effect, index, v);
-                } else {
-                    engine.setYawnAudioEffectParam(effect, index, v);
+        View child = ((ScrollView) scroll).getChildAt(0);
+        if (!(child instanceof LinearLayout)) {
+            return;
+        }
+        LinearLayout root = (LinearLayout) child;
+        List<TextView> headers = new ArrayList<>();
+        List<List<View>> groups = new ArrayList<>();
+        List<Boolean> collapsed = new ArrayList<>();
+        TextView currentHeader = null;
+        List<View> currentGroup = null;
+        boolean currentCollapsed = false;
+
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View view = root.getChildAt(i);
+            if (view instanceof TextView) {
+                Object tag = view.getTag();
+                if ("section".equals(tag) || "section_collapsed".equals(tag)) {
+                    if (currentHeader != null) {
+                        headers.add(currentHeader);
+                        groups.add(currentGroup);
+                        collapsed.add(currentCollapsed);
+                    }
+                    currentHeader = (TextView) view;
+                    currentGroup = new ArrayList<>();
+                    currentCollapsed = "section_collapsed".equals(tag);
+                    continue;
                 }
+            }
+            if (currentGroup != null) {
+                currentGroup.add(view);
+            }
+        }
+        if (currentHeader != null) {
+            headers.add(currentHeader);
+            groups.add(currentGroup);
+            collapsed.add(currentCollapsed);
+        }
+
+        for (int i = 0; i < headers.size(); i++) {
+            TextView header = headers.get(i);
+            List<View> group = groups.get(i);
+            String title = header.getText().toString();
+            if (title.startsWith("▼ ") || title.startsWith("▶ ")) {
+                title = title.substring(2);
+            }
+            final String baseTitle = title;
+            final List<View> content = group;
+            final boolean[] expanded = {!collapsed.get(i)};
+            header.setText((expanded[0] ? "▼ " : "▶ ") + baseTitle);
+            for (View view : content) {
+                view.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+            }
+            header.setOnClickListener(v -> {
+                expanded[0] = !expanded[0];
+                for (View view : content) {
+                    view.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+                }
+                header.setText((expanded[0] ? "▼ " : "▶ ") + baseTitle);
             });
         }
     }
 
-    private void addSectionHeader(String text) {
-        TextView header = new TextView(this);
-        header.setText(text);
-        header.setTextSize(20);
-        header.setPadding(0, 20, 0, 8);
-        yawnControls.addView(header);
+    private static final class YawnEngineLimits {
+        static final int MIDI_CHAIN = 8;
+        static final int AUDIO_CHAIN = 8;
     }
 
     private void addParamSlider(LinearLayout parent, String name, float min,
@@ -1736,6 +2107,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
+                scheduleSaveSynthState();
             }
         });
         parent.addView(bar);
@@ -1771,6 +2143,12 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
+        saveSynthStateNow();
+        resumed = false;
+        if (mHandler != null) {
+            mHandler.removeCallbacks(audioResumeRetry);
+        }
+        stopAllTouches(true);
         super.onPause();
         if (mHandler != null && screenUpdater != null) {
             mHandler.removeCallbacks(screenUpdater);
@@ -1783,8 +2161,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         if (engine != null) {
             engine.resumeAudio();
+        }
+        if (mHandler != null) {
+            mHandler.removeCallbacks(audioResumeRetry);
+            mHandler.postDelayed(audioResumeRetry, 500);
+            mHandler.postDelayed(audioResumeRetry, 1500);
         }
         if (mHandler != null && screenUpdater != null) {
             mHandler.removeCallbacks(screenUpdater);
@@ -1793,7 +2177,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && resumed && engine != null) {
+            engine.resumeAudio();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
+        saveSynthStateNow();
+        resumed = false;
+        if (mHandler != null) {
+            mHandler.removeCallbacks(audioResumeRetry);
+        }
         if (mHandler != null && screenUpdater != null) {
             mHandler.removeCallbacks(screenUpdater);
         }
@@ -1801,6 +2198,7 @@ public class MainActivity extends AppCompatActivity {
             rtpMidiClient.stop();
             rtpMidiClient = null;
         }
+        stopAllTouches(true);
         if (engine != null) {
             engine.shutdownVAEngine();
             engine = null;

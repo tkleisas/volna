@@ -1,91 +1,405 @@
-# volna - wavetable touch synthesizer for android
+# volna — wavetable touch synthesizer for Android
 
-(for greek text, scroll down)
+**волна** (pronounced *volna*) means “wave” in Russian. Volna is a landscape,
+multitouch wavetable instrument for Android. It combines a large expressive touch
+surface with two selectable synthesis engines, editable MIDI and audio effect
+chains, microtonal tuning, MPE output, and a Wi-Fi RTP-MIDI bridge to
+[YAWN](https://github.com/tkleisas/yawn).
 
-For a prebuilt apk you can install on your android device, go to the releases.
-https://github.com/bokontep/volna/releases/tag/0.8c
+Prebuilt APKs are published on the
+[releases page](https://github.com/tkleisas/volna/releases).
 
-волна (pronounced volna in English) means wave in Russian. It is a wavetable synthesizer/musical instrument presented as an android application. I made it in order to test some ideas on audio synthesis and ui interface design.
-It utilises a 10 voice architecture with 2 oscillators per voice. The 2 oscillators are wavetable oscillators. The sound is produced using a table with 256 waveforms of 256 samples each.
+![Volna wavetables](./images/volnawavetable.gif?raw=true)
 
-The samples are sine, triangle, square, saw and noise, smootly interpolated and low pass filtered in order to reduce aliasing.
-![Image of volna wavetables](./images/volnawavetable.gif?raw=true)
+![Volna in action](./images/volna0.8c.png?raw=true)
 
-You can play the instrument simply by touching on the screen. The application supports multitouch and variable pressure (not all phones support pressure though!). The screen is presented
-in landscape. By sliding your finger on the x axis you select the pitch, and by sliding your finger on the y axis you select the wavetable and octave. On the lower part of the screen,
-we have lower pitched notes, on the middle, higher pitched notes and on the upper part of the screen we have the highest pitched notes. By pressing the SET button, the settings menu is displayed.  On the settings menu, we can select the root note from C0 to B6 and the scale used.
-Currently the synth supports chromatic, major and minor scales as well as pentatonic and blues scales, as well as some more. You can also set the ADSR envelopes of the two oscillators and you can also select
-the grid size that determines how much you should slide your finger in the horizontal axis in order to change the note played.
-As you play, a waveform of the currently playing sound is displayed on screen.
-Below you can see an image of the program in action:
-![Image of volna program in action](./images/volna0.8c.png?raw=true)
+Demo video: <https://youtu.be/Cf_wpDYhudk>
 
-And you can see a short demo in this youtube video:
-https://youtu.be/Cf_wpDYhudk
+---
 
-# Development build
+## Contents
 
-Requirements: JDK 17, Android SDK (API 34), NDK `27.2.12479018`, and CMake `3.22.1`.
+- [Performance surface](#performance-surface)
+- [Sound engines](#sound-engines)
+- [Effect chains](#effect-chains)
+- [Microtonal tuning and MPE](#microtonal-tuning-and-mpe)
+- [Touch pressure](#touch-pressure)
+- [Wavetables and VWaveEditor import](#wavetables-and-vwaveeditor-import)
+- [YAWN integration over RTP-MIDI](#yawn-integration-over-rtp-midi)
+- [MIDI controller and device support](#midi-controller-and-device-support)
+- [Settings, persistence, and lifecycle](#settings-persistence-and-lifecycle)
+- [Recording and playback](#recording-and-playback)
+- [DSP meter and performance](#dsp-meter-and-performance)
+- [Architecture](#architecture)
+- [Project layout](#project-layout)
+- [Build and test](#build-and-test)
+- [Testing and CI](#testing-and-ci)
+- [Known limitations and roadmap](#known-limitations-and-roadmap)
+- [Credits and licenses](#credits-and-licenses)
+- [Greek documentation](#greek-documentation)
+
+---
+
+## Performance surface
+
+- Landscape, fullscreen, multitouch surface with up to 10 simultaneous touches.
+- Horizontal position selects pitch; vertical position selects octave/wavetable
+  colour and brightness.
+- The note grid is drawn on screen. **Grid size** sets how many pixels of
+  horizontal travel are needed to reach the next note.
+- Finger pressure drives note velocity when the touchscreen exposes pressure.
+- Live oscilloscope, active-note markers, note names, cent offsets, and spread
+  values are drawn on the surface.
+- The **SET** button opens the settings panel; **REC** and **PLAY** control the
+  built-in loop recorder.
+- The app keeps the screen awake and is locked to landscape.
+
+## Sound engines
+
+Three engines can be selected at runtime.
+
+### Volna Classic
+
+- The original 10-voice dual-wavetable engine.
+- 256 wavetables, each 256 samples long, morphing from sine through triangle,
+  square, saw, and filtered noise.
+- Two oscillators per voice, per-oscillator ADSR, oscillator spread, and delay.
+- Kept for the original character and for users who prefer the classic controls.
+- Supports custom `.vwt` imports by resampling them into the 256-slot morph bank.
+
+### YAWN Wavetable
+
+- YAWN’s 16-voice wavetable synthesizer.
+- Built-in banks: Basic (sine → triangle → saw → square → pulse), PWM, Formant,
+  Harmonic, and Digital.
+- Frame morphing with the **Position** parameter.
+- State-variable filter with cutoff, resonance, and filter envelope.
+- Amp ADSR, sub oscillator, unison detune, LFO-to-position, and master volume.
+- Loads VWaveEditor `.vwt` v1/v2 files directly into its Custom table slot.
+
+### YAWN Subtractive
+
+- YAWN’s virtual-analog synthesizer.
+- Two oscillators plus sub oscillator and noise.
+- Oscillator waveforms, levels, detune, octave, and sub/noise mix.
+- LP/BP/HP state-variable filter with envelope and resonance.
+- Amp ADSR, filter ADSR, LFO, and master volume.
+
+The selected YAWN instrument and its full parameter set are persisted across
+launches. Both YAWN instrument banks are saved, so switching between Wavetable
+and Subtractive does not lose the other instrument’s settings.
+
+## Effect chains
+
+The YAWN engine hosts a MIDI-effect chain followed by the instrument and an
+audio-effect chain. Both chains are editable at runtime.
+
+### MIDI effects
+
+| Effect | Purpose |
+|---|---|
+| Arpeggiator | Direction, rate, gate, octaves, swing, and free-running clock |
+| Chord | Up to six parallel intervals with velocity scaling |
+| Scale | Scale-quantised output |
+| Note Length | Gate-length shaping |
+| Velocity | Velocity scaling/compression |
+| Random | Random note/velocity variation |
+| Pitch | Semitone/octave transposition |
+| LFO | LFO modulator slot (modulation routing is not yet wired) |
+
+### Audio effects
+
+| Effect | Purpose |
+|---|---|
+| Delay | Time, feedback, wet/dry, ping-pong, feedback filter, tempo sync |
+| Chorus | Rate, depth, wet/dry, voices |
+| Reverb | Room size, damping, wet/dry, pre-delay, width |
+| Filter | LP/HP/BP/notch with cutoff and resonance |
+| Distortion | Soft clip, hard clip, tube, foldback, tone, 2× oversampling |
+| EQ | Three-band shelf/peak EQ |
+| Compressor | Threshold, ratio, knee, attack/release, makeup gain |
+| Limiter | Ceiling, lookahead, release |
+
+### Chain editor
+
+- Up to **8 slots per chain**, with duplicate effect types allowed.
+- **Add effect** appends an effect from the catalog.
+- **Up** / **Down** reorder the chain.
+- **Remove** deletes a slot.
+- **ON/OFF** bypasses the effect without removing it.
+- **Params** expands the effect’s own parameter sliders.
+- Chain order, bypass state, and every parameter value are persisted.
+- The old legacy delay sliders still work in YAWN mode: they target the first
+  Delay effect in the audio chain.
+
+## Microtonal tuning and MPE
+
+Tuning is no longer baked into MIDI note numbers. Touch input is converted to a
+continuous target pitch in standard 12-TET semitones, then split into:
+
+- a normal MIDI note (0–127), and
+- a per-note pitch-bend offset.
+
+This keeps external MIDI note numbers meaningful while allowing arbitrary
+microtonal pitches and glissandi.
+
+Supported controls:
+
+- **Root note** from C0 to B6.
+- **Scales**: chromatic, major, natural/harmonic/melodic minor, acoustic,
+  major2, minor2, pentatonic, blues, Chinese pentatonic, whole tone, whole-half,
+  and half-whole.
+- **A4 tuning**: 400–500 Hz.
+- **TET**: 2–48 equal divisions of the octave. TET applies to both YAWN engines.
+- **Octave factor**: 1.5–2.5, allowing stretched or compressed octaves.
+- **Register offsets**: independent low/middle/high note offsets for the three
+  vertical zones of the touch surface.
+
+Gesture model:
+
+- **Legato on**: each touch keeps an anchor note and slides with up to ±48
+  semitones of bend. It re-anchors only when the range is exceeded.
+- **Legato off**: the nearest standard note follows the touch and the bend stays
+  small, with note retriggering at crossings.
+- Internal voices receive per-note pitch bend, applied independently per voice.
+- External MIDI uses **MPE**: one member channel per touch, channel pitch bend,
+  channel pressure, and automatic lower-zone plus 48-semitone range RPNs.
+
+## Touch pressure
+
+- Detects `AXIS_PRESSURE` per touchscreen through `InputDevice.MotionRange`.
+- When supported, pressure drives note velocity through a musical curve and is
+  sent as MPE channel pressure.
+- When pressure is unavailable, touch size (`AXIS_SIZE`) is used as a coarse
+  expressive fallback; otherwise a fixed default velocity is used.
+- Per-finger pressure is tracked independently.
+- The velocity value is displayed next to the active note marker.
+
+## Wavetables and VWaveEditor import
+
+- Imports VWaveEditor `.vwt` **v1 and v2** files through Android’s document
+  picker.
+- Validates the format, dimensions, base64 data, and total size before use.
+- Supports non-uniform keyframe positions; frames are linearly blended.
+- Imported tables are previewed, stored in app-private storage, and restored on
+  launch.
+- **Restore factory bank** removes the custom table and returns to the built-ins.
+- In YAWN Wavetable mode, the file is loaded directly by YAWN’s wavetable synth
+  (frames are resampled to its 256-sample frames and capped at its frame count).
+- In Volna Classic mode, the import is resampled and blended into the 256-slot
+  morph bank.
+
+## YAWN integration over RTP-MIDI
+
+Volna can act as a wireless MIDI controller for YAWN.
+
+1. Start YAWN on a computer on the same network. It listens for sessionless
+   RTP-MIDI on UDP `5004` by default. Override with `YAWN_RTP_MIDI_PORT`.
+2. In Volna, open settings, enter the YAWN host IP, keep the port at `5004`, and
+   enable **RTP-MIDI ON**.
+3. In YAWN, arm a MIDI track and route it to **All Ports** or the MPE-aware input.
+
+Protocol details:
+
+- RFC 6295 RTP-MIDI packets, 48 kHz timestamp units, no recovery journal.
+- Sessionless: no AppleMIDI invitation/sync handshake is required.
+- Notes are sent on MPE member channels 1–15; pitch bend carries the microtonal
+  offset; pressure is sent as channel pressure.
+- YAWN translates member-channel bends into per-note expression before routing,
+  so each voice can be tuned independently.
+- MPE lower-zone configuration and 48-semitone pitch-bend-range RPNs are sent
+  automatically when the connection starts.
+
+## MIDI controller and device support
+
+- Android MIDI API input and output port selection.
+- Virtual MIDI device service advertised as **Bokontep Volna** with an input
+  port, so other apps can send notes/CCs to Volna.
+- Incoming MIDI: note on/off, pitch bend, and control change.
+- Outgoing MIDI: notes, pitch bend, channel pressure, MPE member channels, and
+  RTP-MIDI.
+- Hardware MIDI port lists are rescanned on launch.
+
+## Settings, persistence, and lifecycle
+
+Settings groups are collapsible for navigation:
+
+- **Performance**: grid size, DSP load, peak reset.
+- **Sound engine**: engine selector, instrument parameters, tempo/master,
+  MIDI effect chain, audio effect chain.
+- **Appearance**: green/red terminal theme.
+- **Tuning**: root, scale, A4, octave factor, TET, legato, register offsets.
+- **Classic oscillator**: legacy ADSR, spread, wavetable and wave-control
+  sliders.
+- **Legacy delay**: original delay level/time/feedback controls.
+- **Wavetable bank**: import and factory restore.
+- **MIDI devices**: Android MIDI input/output selectors.
+- **RTP-MIDI**: host, port, enable toggle, status.
+
+Persisted state:
+
+- Engine selection, YAWN instrument, tempo, master volume.
+- Both YAWN instrument parameter banks.
+- Every MIDI/audio effect chain: composition, order, bypass, and parameters.
+- Tuning, scale, root, register offsets, grid size, legato, theme.
+- Imported wavetable bytes and display name.
+- RTP-MIDI host/port/enabled state.
+- Legacy oscillator, envelope, wave-control, and delay settings.
+
+State is saved after edits via a short debounce and on pause/destroy. It is
+restored on launch and when switching back to a YAWN engine. Corrupt state is
+discarded and defaults are used.
+
+Audio lifecycle:
+
+- The Oboe stream is stopped on pause and reopened on resume.
+- If Android closes or disconnects the stream while the app is idle, the engine
+  recreates it on window focus, on touch, and through delayed resume retries.
+
+## Recording and playback
+
+- **REC** records the final mixed output into a 60-second loop buffer.
+- **PLAY** loops the recording; start/end trims are applied.
+- Recording and playback are available in both Classic and YAWN engines.
+- Loop playback is added after the synth/effect chain but before master volume.
+
+## DSP meter and performance
+
+The settings panel shows real-time DSP callback load and peak load, with a reset
+button.
+
+Measured on the test device:
+
+- Idle, default chain (3 MIDI + 4 audio effects, all bypassed): about **5%**.
+- One held note, default chain: about **12%** average.
+- All **16** effect slots enabled: about **41% average**, with peaks above the
+  callback budget (about 146% measured). At that load dropouts are possible.
+
+Headroom is comfortable for normal 3–5 effect chains. Reverb is the most
+expensive audio effect. Use the meter and keep the chain moderate when targeting
+glitch-free low-latency audio.
+
+## Architecture
+
+```
+Android UI (Java)
+  ├─ MainActivity / settings / touch surface
+  ├─ VwtWavetable parser + WavetableStore
+  ├─ SynthEngine JNI facade
+  └─ RtpMidiClient (RTP-MIDI sender)
+            │ JNI
+            ▼
+C++ engine (NDK)
+  ├─ EngineEventQueue (multi-producer, lock-free audio consumer)
+  ├─ YawnEngine
+  │   ├─ MIDI effect chain
+  │   ├─ Wavetable / Subtractive instrument
+  │   ├─ audio effect chain
+  │   ├─ loop recorder
+  │   └─ JSON state save/restore
+  ├─ Volna Classic VAEngine
+  └─ Oboe low-latency output
+            │
+            ▼
+Vendored YAWN DSP (instruments, MIDI effects, audio effects)
+```
+
+Key design choices:
+
+- UI/MIDI events are queued and applied on the audio thread.
+- Wavetable banks and effect chains are mutated with the stream stopped.
+- YAWN instruments apply per-note pitch bend per voice.
+- Effect chain state is versioned JSON, persisted by the UI layer.
+- Oboe stream recovery handles closed/disconnected/stale states.
+
+## Project layout
+
+```
+app/src/main/java/org/bokontep/wavesynth/
+  MainActivity.java          touch surface, settings, chain editor
+  SynthEngine.java           JNI facade
+  VwtWavetable.java          .vwt parser and 256-slot mapper
+  WavetableStore.java        imported wavetable persistence
+  MicrotonalPitchMapper.java continuous pitch + note/bend split
+  MicrotonalVoice.java       hybrid anchor/re-anchor gesture state
+  TouchExpression.java       pressure/velocity curve
+  RtpMidiClient.java         RTP-MIDI sender
+  CollapsibleSection.java    settings section UI
+app/src/main/cpp/
+  include/                   VAEngine, YawnEngine, event queue, DSP headers
+  src/                       classic AD/ADSR
+  yawn_dsp/                  vendored YAWN DSP subset + license
+  wavesynth-lib.cpp          JNI boundary
+app/src/test/                JVM unit tests
+scripts/sync_yawn_dsp.sh     refresh vendored YAWN DSP
+.github/workflows/android.yml CI build + unit tests
+```
+
+## Build and test
+
+Requirements:
+
+- JDK 17
+- Android SDK (compileSdk 34)
+- Android NDK `27.2.12479018`
+- CMake `3.22.1`
 
 ```sh
-git clone --recursive https://github.com/bokontep/volna.git
+git clone --recursive https://github.com/tkleisas/volna.git
 cd volna
 ./gradlew :app:assembleDebug
 ./gradlew :app:testDebugUnitTest
+./gradlew :app:lintDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/`. You can also open the
-project in Android Studio, make sure the NDK above is installed, and build the
-`app` configuration.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+You can also open the project in Android Studio, install the NDK above, and
+build the `app` configuration.
 
-# Sound engine
+## Testing and CI
 
-Volna now includes a second engine built from YAWN's portable DSP modules:
+- JVM unit tests cover `.vwt` parsing/mapping, microtonal pitch splitting,
+  hybrid gesture transitions, pressure curves, and RTP-MIDI packet layout.
+- Native YAWN tests cover per-note pitch bend, MPE translation, and RTP-MIDI
+  parsing.
+- GitHub Actions builds the debug APK and runs the unit tests on every push and
+  pull request.
 
-- **Volna Classic** — the original 256-table dual-wavetable engine.
-- **YAWN Wavetable** — YAWN's 16-voice wavetable synth with morphing,
-  filter/envelope controls, unison and custom `.vwt` tables.
-- **YAWN Subtractive** — YAWN's virtual-analog synth (2 oscillators + sub +
-  noise, state-variable filter, LFO, ADSR envelopes).
+## Known limitations and roadmap
 
-The YAWN engine also hosts a MIDI-effect chain (Arpeggiator, Chord, Scale, Note
-Length, Velocity, Random, Pitch, LFO) and an audio-effect chain (Delay, Chorus,
-Reverb, Filter, Distortion, EQ, Compressor, Limiter). Select an effect and use
-the **Enabled/Bypassed** toggle in the settings panel. Tempo and master volume
-are saved with the other preferences.
+- RTP-MIDI is sessionless; AppleMIDI session negotiation is not implemented.
+- External MIDI uses MPE, not a true MIDI 2.0 UMP transport. Internally the
+  engine uses per-note pitch bend.
+- The LFO is present in the MIDI effect catalog, but modulation routing to
+  instrument/effect parameters is not wired yet.
+- Effect chains support 8 slots each; the CPU can be overloaded when all 16 are
+  enabled simultaneously.
+- Hardware MIDI port selections are re-scanned at launch rather than persisted.
+- Stereo output only.
+- No plugin hosting inside Volna.
 
-## Wavetables
+Future work: LFO modulation routing, MIDI 2.0 UMP transport, MIDI port
+persistence, effect presets, and per-effect serialisation beyond the current
+chain state.
 
-Use **Import .vwt wavetable...** in the settings panel to load a VWaveEditor
-`.vwt` v1/v2 file. The imported table is validated, previewed, persisted in the
-app's private storage, and restored on the next launch. **Restore factory bank**
-returns to the built-in tables. In YAWN Wavetable mode the file is loaded
-directly by YAWN's wavetable synth; in Volna Classic mode it is resampled into
-the 256-slot morph bank.
+## Credits and licenses
 
-## RTP-MIDI controller (YAWN)
+- Volna: MIT.
+- YAWN DSP subset: MIT; see `app/src/main/cpp/yawn_dsp/NOTICE.md` and
+  `LICENSE-yawn.txt`.
+- nlohmann/json: MIT.
+- Google Oboe: Apache 2.0.
+- VWaveEditor: `.vwt` format and wavetable tooling.
+- Original Volna project by Bokontep.
 
-Volna can send its touch output directly to YAWN over Wi-Fi:
+---
 
-1. Start YAWN on a computer on the same network. It listens for sessionless
-   RTP-MIDI on UDP port `5004` (override with `YAWN_RTP_MIDI_PORT`).
-2. In Volna's settings, enter the YAWN host IP, leave the port at `5004`, and
-   enable **RTP-MIDI ON**.
-3. In YAWN, arm a MIDI track and set its input to **All Ports**.
-
-The sender implements RFC 6295 RTP-MIDI packets with 48 kHz timestamp units and
-no recovery journal. It is sessionless: AppleMIDI invitation/sync handshakes are
-not required, which keeps the Android and YAWN sides self-contained.
-
-# Technical info
-Volna uses the Google oboe library for low latency audio. The GUI is java but all the audio functions are implemented in C++ based on previous work done in my other repositories like
-https://github.com/bokontep/ofsynth
-Currently I test this application on a Xiaomi Mi A2 Lite (It supports pressure!) and a Samsung Galaxy 7 edge (No pressure sensitivity). I would recommend a fairly recent device because the application is quite cpu heavy.
-Maybe someday I will release this on Google Play, who knows...
-Enjoy and as always peace...
-
+<a id="greek-documentation"></a>
 
 # Βόλνα, πολυφωνικό-πολυδειγματικό συνθεσάϊζερ για android
+
+> Η ελληνική ενότητα είναι ιστορική. Η αγγλική τεκμηρίωση παραπάνω είναι η
+> πλήρης και ενημερωμένη περιγραφή των λειτουργιών.
 
 Το волна (βόλνα) σημαίνει κύμα στα Ρώσικα και είναι ένα συνθεσάϊζερ που δουλεύει σε κινητά και τάμπλετ με μια σχετικά πρόσφατη έκδοση android (το έχω δοκιμάσει σε Android 8 και Android 10). Η αρχιτεκτονική του είναι πολυφωνική (10 φωνές, όσα και τα δάχτυλα των περισσοτέρων από εμάς). Κάθε φωνή έχει 2 ταλαντωτές οι οποίοι έχουν 256 κυματομορφές. Οι κυματομορφές είναι ημίτονο, τριγωνική, τετραγωνική, πριονωτή και θόρυβος μιξαρισμένες μεταξύ τους και φιλτραρισμένες με ένα χαμηλοπερατό φίλτρο προκειμένου να περιοριστεί το aliasing. Στην εικόνα μπορείτε να δείτε τις κυματομορφές:
 ![Image of volna wavetables](./images/volnawavetable.gif?raw=true)

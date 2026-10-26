@@ -1,6 +1,7 @@
 #include "YawnEngine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -23,9 +24,11 @@
 #include "midi/Scale.h"
 #include "midi/VelocityEffect.h"
 #include "util/Logger.h"
+#include <nlohmann/json.hpp>
 
 namespace {
 constexpr float kCcTimeMax = 5.0f;
+constexpr float MicrotonalBendRange = 48.0f;
 
 float ccToSeconds(int value) {
     const float t = static_cast<float>(std::clamp(value, 0, 127)) / 127.0f;
@@ -45,34 +48,24 @@ YawnEngine::YawnEngine() {
     mMetadataInstruments[0] = std::make_unique<yawn::instruments::WavetableSynth>();
     mMetadataInstruments[1] = std::make_unique<yawn::instruments::SubtractiveSynth>();
 
-    mMidiEffects[0] = std::make_unique<yawn::midi::Arpeggiator>();
-    mMidiEffects[1] = std::make_unique<yawn::midi::Chord>();
-    mMidiEffects[2] = std::make_unique<yawn::midi::Scale>();
-    mMidiEffects[3] = std::make_unique<yawn::midi::NoteLength>();
-    mMidiEffects[4] = std::make_unique<yawn::midi::VelocityEffect>();
-    mMidiEffects[5] = std::make_unique<yawn::midi::MidiRandom>();
-    mMidiEffects[6] = std::make_unique<yawn::midi::MidiPitch>();
-    mMidiEffects[7] = std::make_unique<yawn::midi::LFO>();
+    mMidiCatalog[0] = std::make_unique<yawn::midi::Arpeggiator>();
+    mMidiCatalog[1] = std::make_unique<yawn::midi::Chord>();
+    mMidiCatalog[2] = std::make_unique<yawn::midi::Scale>();
+    mMidiCatalog[3] = std::make_unique<yawn::midi::NoteLength>();
+    mMidiCatalog[4] = std::make_unique<yawn::midi::VelocityEffect>();
+    mMidiCatalog[5] = std::make_unique<yawn::midi::MidiRandom>();
+    mMidiCatalog[6] = std::make_unique<yawn::midi::MidiPitch>();
+    mMidiCatalog[7] = std::make_unique<yawn::midi::LFO>();
 
-    mAudioEffects[0] = std::make_unique<yawn::effects::Delay>();
-    mAudioEffects[1] = std::make_unique<yawn::effects::Chorus>();
-    mAudioEffects[2] = std::make_unique<yawn::effects::Reverb>();
-    mAudioEffects[3] = std::make_unique<yawn::effects::Filter>();
-    mAudioEffects[4] = std::make_unique<yawn::effects::Distortion>();
-    mAudioEffects[5] = std::make_unique<yawn::effects::EQ>();
-    mAudioEffects[6] = std::make_unique<yawn::effects::Compressor>();
-    mAudioEffects[7] = std::make_unique<yawn::effects::Limiter>();
+    mAudioCatalog[0] = std::make_unique<yawn::effects::Delay>();
+    mAudioCatalog[1] = std::make_unique<yawn::effects::Chorus>();
+    mAudioCatalog[2] = std::make_unique<yawn::effects::Reverb>();
+    mAudioCatalog[3] = std::make_unique<yawn::effects::Filter>();
+    mAudioCatalog[4] = std::make_unique<yawn::effects::Distortion>();
+    mAudioCatalog[5] = std::make_unique<yawn::effects::EQ>();
+    mAudioCatalog[6] = std::make_unique<yawn::effects::Compressor>();
+    mAudioCatalog[7] = std::make_unique<yawn::effects::Limiter>();
 
-    for (auto& bypass : mMidiBypass) bypass.store(true);
-    for (auto& bypass : mAudioBypass) bypass.store(true);
-
-    for (int fx = 0; fx < kMidiEffectCount; ++fx) {
-        for (int p = 0; p < kMaxParams; ++p) mMidiParams[fx].values[p].store(0.0f);
-    }
-    for (int fx = 0; fx < kAudioEffectCount; ++fx) {
-        for (int p = 0; p < kMaxParams; ++p) mAudioParams[fx].values[p].store(0.0f);
-    }
-    for (int p = 0; p < kMaxParams; ++p) mInstrumentParams.values[p].store(0.0f);
 }
 
 YawnEngine::~YawnEngine() {
@@ -103,15 +96,16 @@ void YawnEngine::init(float sampleRate, int instrumentIndex) {
     mFadeSamples = mSampleRate / 100; // 10 ms fade
 
     mInstrumentIndex = std::clamp(instrumentIndex, 0, kInstrumentCount - 1);
+    initInstrumentBanks();
     mInstrument = createInstrument(mInstrumentIndex);
-    applyInstrumentDefaults();
-    initMidiEffects();
-    initAudioEffects();
+    initMidiChain();
+    initAudioChain();
 
     if (mInstrument) {
         mInstrument->init(mSampleRate, kMaxFrames);
         for (int p = 0; p < mInstrument->parameterCount(); ++p) {
-            mInstrument->setParameter(p, mInstrumentParams.values[p].load());
+            mInstrument->setParameter(
+                p, currentInstrumentParams().values[p].load());
         }
     }
 
@@ -120,12 +114,16 @@ void YawnEngine::init(float sampleRate, int instrumentIndex) {
     mWaveformIndex = 0;
     std::fill(std::begin(mWaveform), std::end(mWaveform), 0.0f);
 
+    mSuspended.store(false);
+    mDspLoad.store(0.0f);
+    mDspPeak.store(0.0f);
     mInitialized.store(true);
     oboeInit();
 }
 
 void YawnEngine::shutdown() {
     mInitialized.store(false);
+    mSuspended.store(false);
     if (mStream) {
         mStream.reset();
     }
@@ -137,6 +135,9 @@ void YawnEngine::shutdown() {
 }
 
 void YawnEngine::oboeInit() {
+    if (mStream) {
+        mStream.reset();
+    }
     oboe::AudioStreamBuilder builder;
     builder.setSharingMode(oboe::SharingMode::Exclusive)
         ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
@@ -163,19 +164,37 @@ bool YawnEngine::audioIsRunning() const {
 }
 
 void YawnEngine::pauseAudio() {
+    mSuspended.store(true);
     if (mStream) mStream->requestStop();
 }
 
 void YawnEngine::resumeAudio() {
+    mSuspended.store(false);
+    if (!mInitialized.load()) {
+        return;
+    }
     if (!mStream) {
-        if (mInitialized.load()) oboeInit();
+        oboeInit();
         return;
     }
     const oboe::StreamState state = mStream->getState();
-    if (state == oboe::StreamState::Stopped ||
-        state == oboe::StreamState::Paused ||
-        state == oboe::StreamState::Open) {
-        mStream->requestStart();
+    switch (state) {
+        case oboe::StreamState::Closed:
+        case oboe::StreamState::Closing:
+        case oboe::StreamState::Disconnected:
+        case oboe::StreamState::Uninitialized:
+        case oboe::StreamState::Unknown:
+        case oboe::StreamState::Pausing:
+        case oboe::StreamState::Stopping:
+            oboeInit();
+            break;
+        case oboe::StreamState::Stopped:
+        case oboe::StreamState::Paused:
+        case oboe::StreamState::Open:
+            mStream->requestStart();
+            break;
+        default:
+            break;
     }
 }
 
@@ -190,42 +209,128 @@ std::unique_ptr<yawn::instruments::Instrument> YawnEngine::createInstrument(
     }
 }
 
-void YawnEngine::applyInstrumentDefaults() {
-    if (!mInstrument) return;
-    const int count = std::min(mInstrument->parameterCount(), kMaxParams);
+YawnEngine::ParamState& YawnEngine::currentInstrumentParams() {
+    return mInstrumentParamsByType[std::clamp(mInstrumentIndex, 0,
+                                               kInstrumentCount - 1)];
+}
+
+const YawnEngine::ParamState& YawnEngine::currentInstrumentParams() const {
+    return mInstrumentParamsByType[std::clamp(mInstrumentIndex, 0,
+                                               kInstrumentCount - 1)];
+}
+
+void YawnEngine::initInstrumentBanks() {
+    for (int inst = 0; inst < kInstrumentCount; ++inst) {
+        const auto& metadata = *mMetadataInstruments[inst];
+        const int count = std::min(metadata.parameterCount(), kMaxParams);
+        for (int p = 0; p < count; ++p) {
+            mInstrumentParamsByType[inst].values[p].store(
+                metadata.parameterInfo(p).defaultValue);
+        }
+    }
+}
+
+std::unique_ptr<yawn::midi::MidiEffect> YawnEngine::createMidiEffect(
+    int type) const {
+    switch (type) {
+        case 0: return std::make_unique<yawn::midi::Arpeggiator>();
+        case 1: return std::make_unique<yawn::midi::Chord>();
+        case 2: return std::make_unique<yawn::midi::Scale>();
+        case 3: return std::make_unique<yawn::midi::NoteLength>();
+        case 4: return std::make_unique<yawn::midi::VelocityEffect>();
+        case 5: return std::make_unique<yawn::midi::MidiRandom>();
+        case 6: return std::make_unique<yawn::midi::MidiPitch>();
+        case 7: return std::make_unique<yawn::midi::LFO>();
+        default: return nullptr;
+    }
+}
+
+std::unique_ptr<yawn::effects::AudioEffect> YawnEngine::createAudioEffect(
+    int type) const {
+    switch (type) {
+        case 0: return std::make_unique<yawn::effects::Delay>();
+        case 1: return std::make_unique<yawn::effects::Chorus>();
+        case 2: return std::make_unique<yawn::effects::Reverb>();
+        case 3: return std::make_unique<yawn::effects::Filter>();
+        case 4: return std::make_unique<yawn::effects::Distortion>();
+        case 5: return std::make_unique<yawn::effects::EQ>();
+        case 6: return std::make_unique<yawn::effects::Compressor>();
+        case 7: return std::make_unique<yawn::effects::Limiter>();
+        default: return nullptr;
+    }
+}
+
+void YawnEngine::clearMidiChain() {
+    for (auto& slot : mMidiChain) slot.reset();
+    mMidiChainCount = 0;
+}
+
+void YawnEngine::clearAudioChain() {
+    for (auto& slot : mAudioChain) slot.reset();
+    mAudioChainCount = 0;
+}
+
+int YawnEngine::appendMidiEffect(int type, bool bypassed) {
+    if (mMidiChainCount >= kMaxMidiChainSlots) return -1;
+    auto effect = createMidiEffect(type);
+    if (!effect) return -1;
+    auto slot = std::make_unique<MidiChainSlot>();
+    slot->type = type;
+    slot->bypassed.store(bypassed);
+    slot->effect = std::move(effect);
+    slot->effect->init(mSampleRate);
+    slot->effect->setBypassed(bypassed);
+    const int count = std::min(slot->effect->parameterCount(), kMaxParams);
     for (int p = 0; p < count; ++p) {
-        const auto& info = mInstrument->parameterInfo(p);
-        mInstrumentParams.values[p].store(info.defaultValue);
+        const float value = slot->effect->parameterInfo(p).defaultValue;
+        slot->params.values[p].store(value);
+        slot->effect->setParameter(p, value);
     }
+    mMidiChain[mMidiChainCount] = std::move(slot);
+    return mMidiChainCount++;
 }
 
-void YawnEngine::initMidiEffects() {
-    for (int fx = 0; fx < kMidiEffectCount; ++fx) {
-        auto& effect = mMidiEffects[fx];
-        if (!effect) continue;
-        effect->init(mSampleRate);
-        effect->setBypassed(mMidiBypass[fx].load());
-        const int count = std::min(effect->parameterCount(), kMaxParams);
-        for (int p = 0; p < count; ++p) {
-            const float value = effect->parameterInfo(p).defaultValue;
-            mMidiParams[fx].values[p].store(value);
-            effect->setParameter(p, value);
-        }
+int YawnEngine::appendAudioEffect(int type, bool bypassed) {
+    if (mAudioChainCount >= kMaxAudioChainSlots) return -1;
+    auto effect = createAudioEffect(type);
+    if (!effect) return -1;
+    auto slot = std::make_unique<AudioChainSlot>();
+    slot->type = type;
+    slot->bypassed.store(bypassed);
+    slot->effect = std::move(effect);
+    slot->effect->init(mSampleRate, kMaxFrames);
+    slot->effect->setBypassed(bypassed);
+    const int count = std::min(slot->effect->parameterCount(), kMaxParams);
+    for (int p = 0; p < count; ++p) {
+        const float value = slot->effect->parameterInfo(p).defaultValue;
+        slot->params.values[p].store(value);
+        slot->effect->setParameter(p, value);
     }
+    mAudioChain[mAudioChainCount] = std::move(slot);
+    return mAudioChainCount++;
 }
 
-void YawnEngine::initAudioEffects() {
-    for (int fx = 0; fx < kAudioEffectCount; ++fx) {
-        auto& effect = mAudioEffects[fx];
-        if (!effect) continue;
-        effect->init(mSampleRate, kMaxFrames);
-        effect->setBypassed(mAudioBypass[fx].load());
-        const int count = std::min(effect->parameterCount(), kMaxParams);
-        for (int p = 0; p < count; ++p) {
-            const float value = effect->parameterInfo(p).defaultValue;
-            mAudioParams[fx].values[p].store(value);
-            effect->setParameter(p, value);
-        }
+void YawnEngine::initMidiChain() {
+    clearMidiChain();
+    appendMidiEffect(0, true); // Arpeggiator
+    appendMidiEffect(1, true); // Chord
+    appendMidiEffect(2, true); // Scale
+}
+
+void YawnEngine::initAudioChain() {
+    clearAudioChain();
+    appendAudioEffect(0, true); // Delay
+    appendAudioEffect(1, true); // Chorus
+    appendAudioEffect(2, true); // Reverb
+    appendAudioEffect(7, true); // Limiter
+}
+
+void YawnEngine::resetChainEffects() {
+    for (int i = 0; i < mMidiChainCount; ++i) {
+        if (mMidiChain[i] && mMidiChain[i]->effect) mMidiChain[i]->effect->reset();
+    }
+    for (int i = 0; i < mAudioChainCount; ++i) {
+        if (mAudioChain[i] && mAudioChain[i]->effect) mAudioChain[i]->effect->reset();
     }
 }
 
@@ -240,23 +345,22 @@ bool YawnEngine::selectInstrument(int index) {
 
     mInstrumentIndex = index;
     mInstrument = createInstrument(index);
-    applyInstrumentDefaults();
     if (mInstrument) {
         mInstrument->init(mSampleRate, kMaxFrames);
         for (int p = 0; p < mInstrument->parameterCount(); ++p) {
-            mInstrument->setParameter(p, mInstrumentParams.values[p].load());
+            mInstrument->setParameter(
+                p, currentInstrumentParams().values[p].load());
         }
         auto* wavetable =
             dynamic_cast<yawn::instruments::WavetableSynth*>(mInstrument.get());
         if (wavetable && !mWavetablePath.empty()) {
             std::string error;
             wavetable->loadCustomWavetable(mWavetablePath, &error);
-            mInstrumentParams.values[0].store(
+            currentInstrumentParams().values[0].store(
                 static_cast<float>(yawn::instruments::WavetableSynth::kCustomTable));
         }
     }
-    for (auto& effect : mMidiEffects) effect->reset();
-    for (auto& effect : mAudioEffects) effect->reset();
+    resetChainEffects();
     mEvents.clear();
     mMidiBuffer.clear();
 
@@ -330,14 +434,14 @@ const char* YawnEngine::instrumentParamLabel(int index, int label) const {
 
 float YawnEngine::instrumentParamValue(int index) const {
     if (index < 0 || index >= kMaxParams) return 0.0f;
-    return mInstrumentParams.values[index].load();
+    return currentInstrumentParams().values[index].load();
 }
 
 void YawnEngine::setInstrumentParam(int index, float value) {
     const auto* info = instrumentInfo(index);
     if (!info) return;
     const float clamped = clampParam(*info, value);
-    mInstrumentParams.values[index].store(clamped);
+    currentInstrumentParams().values[index].store(clamped);
     EngineEvent event;
     event.type = EngineEvent::Type::SetInstrumentParam;
     event.i = index;
@@ -361,17 +465,26 @@ const char* YawnEngine::midiEffectId(int index) {
 }
 
 const yawn::ParameterInfo* YawnEngine::midiInfo(int effect, int index) const {
-    if (effect < 0 || effect >= kMidiEffectCount || !mMidiEffects[effect])
+    if (effect < 0 || effect >= kMidiEffectCount || !mMidiCatalog[effect])
         return nullptr;
-    if (index < 0 || index >= mMidiEffects[effect]->parameterCount())
+    if (index < 0 || index >= mMidiCatalog[effect]->parameterCount())
         return nullptr;
-    return &mMidiEffects[effect]->parameterInfo(index);
+    return &mMidiCatalog[effect]->parameterInfo(index);
+}
+
+const yawn::ParameterInfo* YawnEngine::midiChainInfo(int slot, int index) const {
+    if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot] ||
+        !mMidiChain[slot]->effect)
+        return nullptr;
+    if (index < 0 || index >= mMidiChain[slot]->effect->parameterCount())
+        return nullptr;
+    return &mMidiChain[slot]->effect->parameterInfo(index);
 }
 
 int YawnEngine::midiEffectParamCount(int effect) const {
-    if (effect < 0 || effect >= kMidiEffectCount || !mMidiEffects[effect])
+    if (effect < 0 || effect >= kMidiEffectCount || !mMidiCatalog[effect])
         return 0;
-    return mMidiEffects[effect]->parameterCount();
+    return mMidiCatalog[effect]->parameterCount();
 }
 
 const char* YawnEngine::midiEffectParamName(int effect, int index) const {
@@ -414,37 +527,152 @@ const char* YawnEngine::midiEffectParamLabel(int effect, int index,
 }
 
 float YawnEngine::midiEffectParamValue(int effect, int index) const {
-    if (effect < 0 || effect >= kMidiEffectCount || index < 0 ||
-        index >= kMaxParams)
-        return 0.0f;
-    return mMidiParams[effect].values[index].load();
+    const auto* info = midiInfo(effect, index);
+    return info ? info->defaultValue : 0.0f;
 }
 
-void YawnEngine::setMidiEffectParam(int effect, int index, float value) {
-    const auto* info = midiInfo(effect, index);
-    if (!info) return;
-    const float clamped = clampParam(*info, value);
-    mMidiParams[effect].values[index].store(clamped);
+void YawnEngine::setMidiEffectParam(int /* effect */, int /* index */,
+                                    float /* value */) {
+}
+
+bool YawnEngine::midiEffectBypassed(int /* index */) const {
+    return true;
+}
+
+void YawnEngine::setMidiEffectBypassed(int /* index */, bool /* bypassed */) {
+}
+
+const char* YawnEngine::midiChainName(int slot) const {
+    if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot]) return "";
+    return midiEffectName(mMidiChain[slot]->type);
+}
+
+const char* YawnEngine::midiChainId(int slot) const {
+    if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot]) return "";
+    return midiEffectId(mMidiChain[slot]->type);
+}
+
+bool YawnEngine::midiChainBypassed(int slot) const {
+    if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot]) return true;
+    return mMidiChain[slot]->bypassed.load();
+}
+
+void YawnEngine::setMidiChainBypassed(int slot, bool bypassed) {
+    if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot]) return;
+    mMidiChain[slot]->bypassed.store(bypassed);
     EngineEvent event;
-    event.type = EngineEvent::Type::SetMidiEffectParam;
-    event.i = effect;
-    event.j = index;
-    event.f = clamped;
+    event.type = EngineEvent::Type::SetMidiEffectBypass;
+    event.i = slot;
+    event.a = bypassed ? 1 : 0;
     push(event);
 }
 
-bool YawnEngine::midiEffectBypassed(int index) const {
-    if (index < 0 || index >= kMidiEffectCount) return true;
-    return mMidiBypass[index].load();
+int YawnEngine::addMidiEffect(int type) {
+    if (type < 0 || type >= kMidiEffectCount) return -1;
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+    const int slot = appendMidiEffect(type, false);
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return slot;
 }
 
-void YawnEngine::setMidiEffectBypassed(int index, bool bypassed) {
-    if (index < 0 || index >= kMidiEffectCount) return;
-    mMidiBypass[index].store(bypassed);
+bool YawnEngine::removeMidiEffect(int slot) {
+    if (slot < 0 || slot >= mMidiChainCount) return false;
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+    for (int i = slot; i < mMidiChainCount - 1; ++i) {
+        mMidiChain[i] = std::move(mMidiChain[i + 1]);
+    }
+    mMidiChain[mMidiChainCount - 1].reset();
+    --mMidiChainCount;
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return true;
+}
+
+bool YawnEngine::moveMidiEffect(int slot, int delta) {
+    const int target = slot + delta;
+    if (slot < 0 || slot >= mMidiChainCount || target < 0 ||
+        target >= mMidiChainCount)
+        return false;
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+    std::swap(mMidiChain[slot], mMidiChain[target]);
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return true;
+}
+
+int YawnEngine::midiChainParamCount(int slot) const {
+    const auto& s = mMidiChain;
+    if (slot < 0 || slot >= mMidiChainCount || !s[slot] || !s[slot]->effect)
+        return 0;
+    return s[slot]->effect->parameterCount();
+}
+
+const char* YawnEngine::midiChainParamName(int slot, int index) const {
+    const auto* info = midiChainInfo(slot, index);
+    return info ? info->name : "";
+}
+
+float YawnEngine::midiChainParamMin(int slot, int index) const {
+    const auto* info = midiChainInfo(slot, index);
+    return info ? info->minValue : 0.0f;
+}
+
+float YawnEngine::midiChainParamMax(int slot, int index) const {
+    const auto* info = midiChainInfo(slot, index);
+    return info ? info->maxValue : 0.0f;
+}
+
+float YawnEngine::midiChainParamDefault(int slot, int index) const {
+    const auto* info = midiChainInfo(slot, index);
+    return info ? info->defaultValue : 0.0f;
+}
+
+bool YawnEngine::midiChainParamIsBoolean(int slot, int index) const {
+    const auto* info = midiChainInfo(slot, index);
+    return info && info->isBoolean;
+}
+
+int YawnEngine::midiChainParamLabelCount(int slot, int index) const {
+    const auto* info = midiChainInfo(slot, index);
+    return info ? info->valueLabelCount : 0;
+}
+
+const char* YawnEngine::midiChainParamLabel(int slot, int index,
+                                            int label) const {
+    const auto* info = midiChainInfo(slot, index);
+    if (!info || !info->valueLabels || label < 0 ||
+        label >= info->valueLabelCount)
+        return "";
+    return info->valueLabels[label];
+}
+
+float YawnEngine::midiChainParamValue(int slot, int index) const {
+    if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot] ||
+        index < 0 || index >= kMaxParams)
+        return 0.0f;
+    return mMidiChain[slot]->params.values[index].load();
+}
+
+void YawnEngine::setMidiChainParam(int slot, int index, float value) {
+    const auto* info = midiChainInfo(slot, index);
+    if (!info || slot < 0 || slot >= mMidiChainCount) return;
+    const float clamped = clampParam(*info, value);
+    mMidiChain[slot]->params.values[index].store(clamped);
     EngineEvent event;
-    event.type = EngineEvent::Type::SetMidiEffectBypass;
-    event.i = index;
-    event.a = bypassed ? 1 : 0;
+    event.type = EngineEvent::Type::SetMidiEffectParam;
+    event.i = slot;
+    event.j = index;
+    event.f = clamped;
     push(event);
 }
 
@@ -463,17 +691,26 @@ const char* YawnEngine::audioEffectId(int index) {
 }
 
 const yawn::ParameterInfo* YawnEngine::audioInfo(int effect, int index) const {
-    if (effect < 0 || effect >= kAudioEffectCount || !mAudioEffects[effect])
+    if (effect < 0 || effect >= kAudioEffectCount || !mAudioCatalog[effect])
         return nullptr;
-    if (index < 0 || index >= mAudioEffects[effect]->parameterCount())
+    if (index < 0 || index >= mAudioCatalog[effect]->parameterCount())
         return nullptr;
-    return &mAudioEffects[effect]->parameterInfo(index);
+    return &mAudioCatalog[effect]->parameterInfo(index);
+}
+
+const yawn::ParameterInfo* YawnEngine::audioChainInfo(int slot, int index) const {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot] ||
+        !mAudioChain[slot]->effect)
+        return nullptr;
+    if (index < 0 || index >= mAudioChain[slot]->effect->parameterCount())
+        return nullptr;
+    return &mAudioChain[slot]->effect->parameterInfo(index);
 }
 
 int YawnEngine::audioEffectParamCount(int effect) const {
-    if (effect < 0 || effect >= kAudioEffectCount || !mAudioEffects[effect])
+    if (effect < 0 || effect >= kAudioEffectCount || !mAudioCatalog[effect])
         return 0;
-    return mAudioEffects[effect]->parameterCount();
+    return mAudioCatalog[effect]->parameterCount();
 }
 
 const char* YawnEngine::audioEffectParamName(int effect, int index) const {
@@ -516,38 +753,391 @@ const char* YawnEngine::audioEffectParamLabel(int effect, int index,
 }
 
 float YawnEngine::audioEffectParamValue(int effect, int index) const {
-    if (effect < 0 || effect >= kAudioEffectCount || index < 0 ||
-        index >= kMaxParams)
-        return 0.0f;
-    return mAudioParams[effect].values[index].load();
+    const auto* info = audioInfo(effect, index);
+    return info ? info->defaultValue : 0.0f;
 }
 
-void YawnEngine::setAudioEffectParam(int effect, int index, float value) {
-    const auto* info = audioInfo(effect, index);
-    if (!info) return;
+void YawnEngine::setAudioEffectParam(int /* effect */, int /* index */,
+                                     float /* value */) {
+}
+
+bool YawnEngine::audioEffectBypassed(int /* index */) const {
+    return true;
+}
+
+void YawnEngine::setAudioEffectBypassed(int /* index */, bool /* bypassed */) {
+}
+
+const char* YawnEngine::audioChainName(int slot) const {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot]) return "";
+    return audioEffectName(mAudioChain[slot]->type);
+}
+
+const char* YawnEngine::audioChainId(int slot) const {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot]) return "";
+    return audioEffectId(mAudioChain[slot]->type);
+}
+
+bool YawnEngine::audioChainBypassed(int slot) const {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot]) return true;
+    return mAudioChain[slot]->bypassed.load();
+}
+
+void YawnEngine::setAudioChainBypassed(int slot, bool bypassed) {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot]) return;
+    mAudioChain[slot]->bypassed.store(bypassed);
+    EngineEvent event;
+    event.type = EngineEvent::Type::SetAudioEffectBypass;
+    event.i = slot;
+    event.a = bypassed ? 1 : 0;
+    push(event);
+}
+
+int YawnEngine::addAudioEffect(int type) {
+    if (type < 0 || type >= kAudioEffectCount) return -1;
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+    const int slot = appendAudioEffect(type, false);
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return slot;
+}
+
+bool YawnEngine::removeAudioEffect(int slot) {
+    if (slot < 0 || slot >= mAudioChainCount) return false;
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+    for (int i = slot; i < mAudioChainCount - 1; ++i) {
+        mAudioChain[i] = std::move(mAudioChain[i + 1]);
+    }
+    mAudioChain[mAudioChainCount - 1].reset();
+    --mAudioChainCount;
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return true;
+}
+
+bool YawnEngine::moveAudioEffect(int slot, int delta) {
+    const int target = slot + delta;
+    if (slot < 0 || slot >= mAudioChainCount || target < 0 ||
+        target >= mAudioChainCount)
+        return false;
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+    std::swap(mAudioChain[slot], mAudioChain[target]);
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return true;
+}
+
+int YawnEngine::audioChainParamCount(int slot) const {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot] ||
+        !mAudioChain[slot]->effect)
+        return 0;
+    return mAudioChain[slot]->effect->parameterCount();
+}
+
+const char* YawnEngine::audioChainParamName(int slot, int index) const {
+    const auto* info = audioChainInfo(slot, index);
+    return info ? info->name : "";
+}
+
+float YawnEngine::audioChainParamMin(int slot, int index) const {
+    const auto* info = audioChainInfo(slot, index);
+    return info ? info->minValue : 0.0f;
+}
+
+float YawnEngine::audioChainParamMax(int slot, int index) const {
+    const auto* info = audioChainInfo(slot, index);
+    return info ? info->maxValue : 0.0f;
+}
+
+float YawnEngine::audioChainParamDefault(int slot, int index) const {
+    const auto* info = audioChainInfo(slot, index);
+    return info ? info->defaultValue : 0.0f;
+}
+
+bool YawnEngine::audioChainParamIsBoolean(int slot, int index) const {
+    const auto* info = audioChainInfo(slot, index);
+    return info && info->isBoolean;
+}
+
+int YawnEngine::audioChainParamLabelCount(int slot, int index) const {
+    const auto* info = audioChainInfo(slot, index);
+    return info ? info->valueLabelCount : 0;
+}
+
+const char* YawnEngine::audioChainParamLabel(int slot, int index,
+                                             int label) const {
+    const auto* info = audioChainInfo(slot, index);
+    if (!info || !info->valueLabels || label < 0 ||
+        label >= info->valueLabelCount)
+        return "";
+    return info->valueLabels[label];
+}
+
+float YawnEngine::audioChainParamValue(int slot, int index) const {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot] ||
+        index < 0 || index >= kMaxParams)
+        return 0.0f;
+    return mAudioChain[slot]->params.values[index].load();
+}
+
+void YawnEngine::setAudioChainParam(int slot, int index, float value) {
+    const auto* info = audioChainInfo(slot, index);
+    if (!info || slot < 0 || slot >= mAudioChainCount) return;
     const float clamped = clampParam(*info, value);
-    mAudioParams[effect].values[index].store(clamped);
+    mAudioChain[slot]->params.values[index].store(clamped);
     EngineEvent event;
     event.type = EngineEvent::Type::SetAudioEffectParam;
-    event.i = effect;
+    event.i = slot;
     event.j = index;
     event.f = clamped;
     push(event);
 }
 
-bool YawnEngine::audioEffectBypassed(int index) const {
-    if (index < 0 || index >= kAudioEffectCount) return true;
-    return mAudioBypass[index].load();
+std::string YawnEngine::saveState() const {
+    nlohmann::json root;
+    root["version"] = 1;
+    root["tempo"] = mTransport.bpm;
+    root["masterVolume"] = mMasterVolume;
+
+    nlohmann::json instruments = nlohmann::json::array();
+    for (int inst = 0; inst < kInstrumentCount; ++inst) {
+        const auto& metadata = *mMetadataInstruments[inst];
+        nlohmann::json entry;
+        entry["type"] = instrumentId(inst);
+        nlohmann::json params = nlohmann::json::array();
+        const int count = std::min(metadata.parameterCount(), kMaxParams);
+        for (int p = 0; p < count; ++p) {
+            params.push_back(
+                mInstrumentParamsByType[inst].values[p].load());
+        }
+        entry["params"] = std::move(params);
+        instruments.push_back(std::move(entry));
+    }
+    root["instruments"] = std::move(instruments);
+
+    nlohmann::json midiChain = nlohmann::json::array();
+    for (int i = 0; i < mMidiChainCount; ++i) {
+        if (!mMidiChain[i] || !mMidiChain[i]->effect) continue;
+        nlohmann::json entry;
+        entry["type"] = midiEffectId(mMidiChain[i]->type);
+        entry["bypass"] = mMidiChain[i]->bypassed.load();
+        nlohmann::json params = nlohmann::json::array();
+        const int count =
+            std::min(mMidiChain[i]->effect->parameterCount(), kMaxParams);
+        for (int p = 0; p < count; ++p) {
+            params.push_back(mMidiChain[i]->params.values[p].load());
+        }
+        entry["params"] = std::move(params);
+        midiChain.push_back(std::move(entry));
+    }
+    root["midiChain"] = std::move(midiChain);
+
+    nlohmann::json audioChain = nlohmann::json::array();
+    for (int i = 0; i < mAudioChainCount; ++i) {
+        if (!mAudioChain[i] || !mAudioChain[i]->effect) continue;
+        nlohmann::json entry;
+        entry["type"] = audioEffectId(mAudioChain[i]->type);
+        entry["bypass"] = mAudioChain[i]->bypassed.load();
+        nlohmann::json params = nlohmann::json::array();
+        const int count =
+            std::min(mAudioChain[i]->effect->parameterCount(), kMaxParams);
+        for (int p = 0; p < count; ++p) {
+            params.push_back(mAudioChain[i]->params.values[p].load());
+        }
+        entry["params"] = std::move(params);
+        audioChain.push_back(std::move(entry));
+    }
+    root["audioChain"] = std::move(audioChain);
+
+    return root.dump();
 }
 
-void YawnEngine::setAudioEffectBypassed(int index, bool bypassed) {
-    if (index < 0 || index >= kAudioEffectCount) return;
-    mAudioBypass[index].store(bypassed);
-    EngineEvent event;
-    event.type = EngineEvent::Type::SetAudioEffectBypass;
-    event.i = index;
-    event.a = bypassed ? 1 : 0;
-    push(event);
+bool YawnEngine::restoreState(const std::string& jsonText,
+                              std::string* error) {
+    if (error) error->clear();
+    if (jsonText.empty()) return true;
+
+    nlohmann::json root;
+    try {
+        root = nlohmann::json::parse(jsonText);
+    } catch (const std::exception& e) {
+        if (error) *error = std::string("invalid state JSON: ") + e.what();
+        return false;
+    }
+    if (!root.is_object() || root.value("version", 0) != 1) {
+        if (error) *error = "unsupported synth state version";
+        return false;
+    }
+
+    struct ChainSpec {
+        int type = -1;
+        bool bypass = true;
+        std::vector<float> params;
+    };
+    auto parseChain = [&](const nlohmann::json& array, bool midi,
+                          std::vector<ChainSpec>& out) {
+        if (!array.is_array()) return false;
+        const int typeCount = midi ? kMidiEffectCount : kAudioEffectCount;
+        const int maxSlots = midi ? kMaxMidiChainSlots : kMaxAudioChainSlots;
+        for (const auto& entry : array) {
+            const std::string id = entry.value("type", std::string{});
+            int type = -1;
+            for (int t = 0; t < typeCount; ++t) {
+                const char* candidate =
+                    midi ? midiEffectId(t) : audioEffectId(t);
+                if (id == candidate) {
+                    type = t;
+                    break;
+                }
+            }
+            if (type < 0) continue;
+            if (static_cast<int>(out.size()) >= maxSlots) {
+                return false;
+            }
+            ChainSpec spec;
+            spec.type = type;
+            spec.bypass = entry.value("bypass", true);
+            if (entry.contains("params") && entry["params"].is_array()) {
+                for (const auto& value : entry["params"]) {
+                    if (value.is_number()) {
+                        spec.params.push_back(value.get<float>());
+                    }
+                }
+            }
+            out.push_back(std::move(spec));
+        }
+        return true;
+    };
+
+    std::vector<ChainSpec> midiChain;
+    std::vector<ChainSpec> audioChain;
+    if (root.contains("midiChain") &&
+        !parseChain(root["midiChain"], true, midiChain)) {
+        if (error) *error = "invalid MIDI effect chain in state";
+        return false;
+    }
+    if (root.contains("audioChain") &&
+        !parseChain(root["audioChain"], false, audioChain)) {
+        if (error) *error = "invalid audio effect chain in state";
+        return false;
+    }
+
+    std::array<std::vector<float>, kInstrumentCount> banks;
+    if (root.contains("instruments") && root["instruments"].is_array()) {
+        for (const auto& entry : root["instruments"]) {
+            const std::string id = entry.value("type", std::string{});
+            int inst = -1;
+            for (int i = 0; i < kInstrumentCount; ++i) {
+                if (id == instrumentId(i)) {
+                    inst = i;
+                    break;
+                }
+            }
+            if (inst < 0) continue;
+            if (entry.contains("params") && entry["params"].is_array()) {
+                for (const auto& value : entry["params"]) {
+                    if (value.is_number()) {
+                        banks[inst].push_back(value.get<float>());
+                    }
+                }
+            }
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    const bool wasRunning = audioIsRunning();
+    if (mStream) mStream->stop();
+
+    if (root.contains("instruments")) {
+        for (int inst = 0; inst < kInstrumentCount; ++inst) {
+            const auto& metadata = *mMetadataInstruments[inst];
+            const int count = std::min(metadata.parameterCount(), kMaxParams);
+            for (int p = 0; p < count; ++p) {
+                const auto& info = metadata.parameterInfo(p);
+                const float value = p < static_cast<int>(banks[inst].size())
+                                        ? banks[inst][p]
+                                        : info.defaultValue;
+                mInstrumentParamsByType[inst].values[p].store(
+                    clampParam(info, value));
+            }
+        }
+        if (mInstrument) {
+            const int count =
+                std::min(mInstrument->parameterCount(), kMaxParams);
+            for (int p = 0; p < count; ++p) {
+                mInstrument->setParameter(
+                    p, currentInstrumentParams().values[p].load());
+            }
+        }
+    }
+
+    if (root.contains("tempo") && root["tempo"].is_number()) {
+        mTransport.bpm = std::clamp(root["tempo"].get<float>(), 20.0f, 300.0f);
+        mSamplesPerBeat =
+            static_cast<double>(mSampleRate) * 60.0 / mTransport.bpm;
+        mTransport.samplesPerBeat = mSamplesPerBeat;
+    }
+    if (root.contains("masterVolume") && root["masterVolume"].is_number()) {
+        mMasterVolume =
+            std::clamp(root["masterVolume"].get<float>(), 0.0f, 2.0f);
+    }
+
+    if (root.contains("midiChain")) {
+        clearMidiChain();
+        for (const auto& spec : midiChain) {
+            const int slot = appendMidiEffect(spec.type, spec.bypass);
+            if (slot < 0) continue;
+            auto& chainSlot = mMidiChain[slot];
+            const int count =
+                std::min(chainSlot->effect->parameterCount(), kMaxParams);
+            for (int p = 0; p < count; ++p) {
+                const auto& info = chainSlot->effect->parameterInfo(p);
+                const float value = p < static_cast<int>(spec.params.size())
+                                        ? spec.params[p]
+                                        : info.defaultValue;
+                const float clamped = clampParam(info, value);
+                chainSlot->params.values[p].store(clamped);
+                chainSlot->effect->setParameter(p, clamped);
+            }
+            chainSlot->bypassed.store(spec.bypass);
+            chainSlot->effect->setBypassed(spec.bypass);
+        }
+    }
+    if (root.contains("audioChain")) {
+        clearAudioChain();
+        for (const auto& spec : audioChain) {
+            const int slot = appendAudioEffect(spec.type, spec.bypass);
+            if (slot < 0) continue;
+            auto& chainSlot = mAudioChain[slot];
+            const int count =
+                std::min(chainSlot->effect->parameterCount(), kMaxParams);
+            for (int p = 0; p < count; ++p) {
+                const auto& info = chainSlot->effect->parameterInfo(p);
+                const float value = p < static_cast<int>(spec.params.size())
+                                        ? spec.params[p]
+                                        : info.defaultValue;
+                const float clamped = clampParam(info, value);
+                chainSlot->params.values[p].store(clamped);
+                chainSlot->effect->setParameter(p, clamped);
+            }
+            chainSlot->bypassed.store(spec.bypass);
+            chainSlot->effect->setBypassed(spec.bypass);
+        }
+    }
+
+    mEvents.clear();
+    mMidiBuffer.clear();
+    if (wasRunning && mStream) mStream->requestStart();
+    return true;
 }
 
 void YawnEngine::setTempo(float bpm) {
@@ -583,6 +1173,15 @@ void YawnEngine::noteOff(int channel, int note, int velocity) {
     event.channel = static_cast<uint8_t>(channel);
     event.a = static_cast<uint8_t>(note);
     event.b = static_cast<uint8_t>(velocity);
+    push(event);
+}
+
+void YawnEngine::notePitch(int channel, int note, float bendSemitones) {
+    EngineEvent event;
+    event.type = EngineEvent::Type::NotePitch;
+    event.channel = static_cast<uint8_t>(channel);
+    event.a = static_cast<uint8_t>(note);
+    event.f = bendSemitones;
     push(event);
 }
 
@@ -697,6 +1296,25 @@ void YawnEngine::processEvents(int /* numFrames */) {
     }
 }
 
+int YawnEngine::findAudioChainSlot(int type) const {
+    for (int i = 0; i < mAudioChainCount; ++i) {
+        if (mAudioChain[i] && mAudioChain[i]->type == type) return i;
+    }
+    return -1;
+}
+
+void YawnEngine::applyAudioChainParam(int slot, int index, float value) {
+    if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot] ||
+        !mAudioChain[slot]->effect || index < 0 || index >= kMaxParams) {
+        return;
+    }
+    const auto* info = audioChainInfo(slot, index);
+    if (!info) return;
+    const float clamped = clampParam(*info, value);
+    mAudioChain[slot]->params.values[index].store(clamped);
+    mAudioChain[slot]->effect->setParameter(index, clamped);
+}
+
 void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
     switch (event.type) {
         case EngineEvent::Type::NoteOn:
@@ -705,6 +1323,15 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
         case EngineEvent::Type::NoteOff:
             handleNoteOff(event.channel, event.a);
             break;
+        case EngineEvent::Type::NotePitch: {
+            const float normalized = std::clamp(
+                event.f / static_cast<float>(MicrotonalBendRange), -1.0f,
+                1.0f);
+            mMidiBuffer.addMessage(yawn::midi::MidiMessage::perNotePitchBend(
+                event.channel, event.a,
+                yawn::midi::Convert::floatToPb32(normalized)));
+            break;
+        }
         case EngineEvent::Type::NoteTransition:
             handleNoteOff(event.channel, event.a);
             handleNoteOn(event.channel, event.b, event.c);
@@ -770,27 +1397,27 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
             if (mInstrument) mInstrument->setParameter(event.i, event.f);
             break;
         case EngineEvent::Type::SetMidiEffectParam:
-            if (event.i >= 0 && event.i < kMidiEffectCount &&
-                mMidiEffects[event.i]) {
-                mMidiEffects[event.i]->setParameter(event.j, event.f);
+            if (event.i >= 0 && event.i < mMidiChainCount &&
+                mMidiChain[event.i] && mMidiChain[event.i]->effect) {
+                mMidiChain[event.i]->effect->setParameter(event.j, event.f);
             }
             break;
         case EngineEvent::Type::SetMidiEffectBypass:
-            if (event.i >= 0 && event.i < kMidiEffectCount &&
-                mMidiEffects[event.i]) {
-                mMidiEffects[event.i]->setBypassed(event.a != 0);
+            if (event.i >= 0 && event.i < mMidiChainCount &&
+                mMidiChain[event.i] && mMidiChain[event.i]->effect) {
+                mMidiChain[event.i]->effect->setBypassed(event.a != 0);
             }
             break;
         case EngineEvent::Type::SetAudioEffectParam:
-            if (event.i >= 0 && event.i < kAudioEffectCount &&
-                mAudioEffects[event.i]) {
-                mAudioEffects[event.i]->setParameter(event.j, event.f);
+            if (event.i >= 0 && event.i < mAudioChainCount &&
+                mAudioChain[event.i] && mAudioChain[event.i]->effect) {
+                mAudioChain[event.i]->effect->setParameter(event.j, event.f);
             }
             break;
         case EngineEvent::Type::SetAudioEffectBypass:
-            if (event.i >= 0 && event.i < kAudioEffectCount &&
-                mAudioEffects[event.i]) {
-                mAudioEffects[event.i]->setBypassed(event.a != 0);
+            if (event.i >= 0 && event.i < mAudioChainCount &&
+                mAudioChain[event.i] && mAudioChain[event.i]->effect) {
+                mAudioChain[event.i]->effect->setBypassed(event.a != 0);
             }
             break;
         case EngineEvent::Type::SetTempo:
@@ -807,23 +1434,38 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
         case EngineEvent::Type::SetRecord:
             doSetRecord(event.a != 0);
             break;
-        case EngineEvent::Type::SetDelayLevel:
-            setAudioEffectParam(0, yawn::effects::Delay::kWetDry, event.f);
-            setAudioEffectBypassed(0, event.f <= 0.001f);
-            break;
-        case EngineEvent::Type::SetDelayLength: {
-            const float ms = mSampleRate > 0
-                                 ? 1000.0f * static_cast<float>(event.i) /
-                                       static_cast<float>(mSampleRate)
-                                 : 500.0f;
-            setAudioEffectParam(0, yawn::effects::Delay::kTimeMs,
-                                std::clamp(ms, 1.0f, 4000.0f));
-            setAudioEffectParam(0, yawn::effects::Delay::kSync, 0.0f);
+        case EngineEvent::Type::SetDelayLevel: {
+            const int slot = findAudioChainSlot(0);
+            if (slot >= 0) {
+                applyAudioChainParam(slot, yawn::effects::Delay::kWetDry,
+                                     event.f);
+                const bool bypassed = event.f <= 0.001f;
+                mAudioChain[slot]->bypassed.store(bypassed);
+                mAudioChain[slot]->effect->setBypassed(bypassed);
+            }
             break;
         }
-        case EngineEvent::Type::SetDelayFeedback:
-            setAudioEffectParam(0, yawn::effects::Delay::kFeedback, event.f);
+        case EngineEvent::Type::SetDelayLength: {
+            const int slot = findAudioChainSlot(0);
+            if (slot >= 0) {
+                const float ms = mSampleRate > 0
+                                     ? 1000.0f * static_cast<float>(event.i) /
+                                           static_cast<float>(mSampleRate)
+                                     : 500.0f;
+                applyAudioChainParam(slot, yawn::effects::Delay::kTimeMs,
+                                     std::clamp(ms, 1.0f, 4000.0f));
+                applyAudioChainParam(slot, yawn::effects::Delay::kSync, 0.0f);
+            }
             break;
+        }
+        case EngineEvent::Type::SetDelayFeedback: {
+            const int slot = findAudioChainSlot(0);
+            if (slot >= 0) {
+                applyAudioChainParam(slot, yawn::effects::Delay::kFeedback,
+                                     event.f);
+            }
+            break;
+        }
         default:
             break;
     }
@@ -997,6 +1639,7 @@ void YawnEngine::recordSamples(const float* left, const float* right,
 oboe::DataCallbackResult YawnEngine::onAudioReady(
     oboe::AudioStream* /* stream */, void* audioData, int32_t numFrames) {
     if (numFrames <= 0) return oboe::DataCallbackResult::Continue;
+    const auto callbackStart = std::chrono::steady_clock::now();
 
     float* output = static_cast<float*>(audioData);
     processEvents(numFrames);
@@ -1013,9 +1656,10 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
             mMidiBuffer.clear();
         }
 
-        for (int fx = 0; fx < kMidiEffectCount; ++fx) {
-            if (!mMidiBypass[fx].load() && mMidiEffects[fx]) {
-                mMidiEffects[fx]->process(mMidiBuffer, frames, mTransport);
+        for (int fx = 0; fx < mMidiChainCount; ++fx) {
+            auto& slot = mMidiChain[fx];
+            if (slot && slot->effect && !slot->bypassed.load()) {
+                slot->effect->process(mMidiBuffer, frames, mTransport);
             }
         }
 
@@ -1027,9 +1671,13 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         if (mInstrument) {
             mInstrument->process(mMixBuffer.data(), frames, 2, mMidiBuffer);
         }
-        for (int fx = 0; fx < kAudioEffectCount; ++fx) {
-            if (!mAudioBypass[fx].load() && mAudioEffects[fx]) {
-                mAudioEffects[fx]->process(mMixBuffer.data(), frames, 2);
+        for (int fx = 0; fx < mAudioChainCount; ++fx) {
+            auto& slot = mAudioChain[fx];
+            if (slot && slot->effect) {
+                slot->effect->setTempo(mTransport.bpm, mBeatPosition, true);
+                if (!slot->bypassed.load()) {
+                    slot->effect->process(mMixBuffer.data(), frames, 2);
+                }
             }
         }
 
@@ -1056,6 +1704,20 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         offset += frames;
         firstChunk = false;
     }
+
+    const double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - callbackStart).count();
+    const double budget = static_cast<double>(numFrames) /
+                          static_cast<double>(mSampleRate);
+    if (budget > 0.0) {
+        const float instant = static_cast<float>(elapsed / budget);
+        const float previous = mDspLoad.load(std::memory_order_relaxed);
+        mDspLoad.store(previous * 0.8f + instant * 0.2f,
+                       std::memory_order_relaxed);
+        if (instant > mDspPeak.load(std::memory_order_relaxed)) {
+            mDspPeak.store(instant, std::memory_order_relaxed);
+        }
+    }
     return oboe::DataCallbackResult::Continue;
 }
 
@@ -1064,7 +1726,7 @@ void YawnEngine::onErrorBeforeClose(oboe::AudioStream* /* stream */,
 
 void YawnEngine::onErrorAfterClose(oboe::AudioStream* /* stream */,
                                    oboe::Result /* error */) {
-    if (mInitialized.load()) {
+    if (mInitialized.load() && !mSuspended.load()) {
         oboeInit();
     }
 }
@@ -1087,7 +1749,7 @@ bool YawnEngine::loadWavetable(const std::string& path, std::string* error) {
     const bool ok = wavetable->loadCustomWavetable(path, error);
     if (ok) {
         mWavetablePath = path;
-        mInstrumentParams.values[0].store(
+        currentInstrumentParams().values[0].store(
             static_cast<float>(yawn::instruments::WavetableSynth::kCustomTable));
     }
     if (wasRunning && mStream) mStream->requestStart();

@@ -3,7 +3,7 @@
 The portable DSP sources under this directory are copied from the YAWN project:
 
 - Source: https://github.com/tkleisas/yawn
-- Commit: `fe34b37`
+- Commit: `fe34b37` (instrument files also include the local per-note pitch-bend changes)
 - License: MIT (see `LICENSE-yawn.txt`)
 
 Included modules:

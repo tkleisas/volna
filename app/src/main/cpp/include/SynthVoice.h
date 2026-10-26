@@ -5,6 +5,9 @@
 #include "ADSR.h"
 #include "LowPass.h"
 
+#include <algorithm>
+#include <cmath>
+
 
 class SynthVoice  {
 public:
@@ -28,14 +31,16 @@ public:
     void MidiNoteOn(int note, int vel)
     {
         
-        //float f = pow(octave_factor,(note*1.0-69.0)/tet)*tune;
-        float f = pow(octave_factor,(note*1.0-(tet*5.75))/tet)*tune;
+        float f = pow(2.0, (note - 69.0) / 12.0) * tune;
 
         velocity = vel/127.0;
-        freq1 = f;
-        freq2 = f;
-        osc[0].SetFrequency(freq1,sampleRate);
-        osc[1].SetFrequency(freq2,sampleRate);
+        baseFreq1 = f;
+        baseFreq2 = f;
+        globalBendMul = 1.0f;
+        noteBendMul = 1.0f;
+        spreadMul1 = 1.0f;
+        spreadMul2 = 1.0f;
+        updateOscillatorFrequencies();
         adsr[0].Gate(1);
         adsr[1].Gate(1);
         osc[0].ResetPhase();
@@ -43,15 +48,11 @@ public:
     }
     void MidiChangeNote(int note, int vel)
     {
-        //float f = pow(octave_factor,(newNote*1.0-69.0)/tet)*tune;
-        float f = pow(octave_factor,(note*1.0-(tet*5.75))/tet)*tune;
+        float f = pow(2.0, (note - 69.0) / 12.0) * tune;
         velocity = vel/127.0;
-        freq1 = f;
-        freq2 = f;
-        osc[0].SetFrequency(freq1,sampleRate);
-        osc[1].SetFrequency(freq2,sampleRate);
-
-
+        baseFreq1 = f;
+        baseFreq2 = f;
+        updateOscillatorFrequencies();
     }
     void Lfo1SetFrequency(float frequency)
     {
@@ -114,12 +115,10 @@ public:
     {
         spread = spread-63;
         float factor = pow(2.0,1.0/12.0)/100.0;
-        float bendfreq1 = freq1+freq1*factor*((float)spread/63.0);
-        float bendfreq2 = freq2-freq2*factor*((float)spread/63.0);
-
-        osc[0].SetFrequency(bendfreq1,sampleRate);
-        osc[1].SetFrequency(bendfreq2,sampleRate);
-
+        float amount = (float)spread/63.0;
+        spreadMul1 = 1.0f + factor*amount;
+        spreadMul2 = 1.0f - factor*amount;
+        updateOscillatorFrequencies();
     }
     void SetOctaveFactor(float factor)
     {
@@ -127,16 +126,16 @@ public:
     }
     void MidiBend(int bend)
     {
-      //AudioNoInterrupts();
       float factor = ((bend - 8192.0)/8192.0);
-      float mul = pow(octave_factor,(factor*tet)/tet);
-      float bendfreq1 = freq1*mul;
-      float bendfreq2 = freq2*mul;
-      
-      osc[0].SetFrequency(bendfreq1,sampleRate);
-      osc[1].SetFrequency(bendfreq2,sampleRate);
+      globalBendMul = pow(octave_factor, factor);
+      updateOscillatorFrequencies();
+    }
 
-      //AudioInterrupts();
+    void SetNoteBend(float bendSemitones)
+    {
+      bendSemitones = std::max(-48.0f, std::min(48.0f, bendSemitones));
+      noteBendMul = pow(2.0f, bendSemitones/12.0f);
+      updateOscillatorFrequencies();
     }
 
     void ControlChange(uint8_t channel, uint8_t control, uint8_t value)
@@ -436,6 +435,14 @@ public:
 		this->tune = tune;
 	}
 protected:
+    void updateOscillatorFrequencies()
+    {
+        osc[0].SetFrequency(baseFreq1*globalBendMul*noteBendMul*spreadMul1,
+                            sampleRate);
+        osc[1].SetFrequency(baseFreq2*globalBendMul*noteBendMul*spreadMul2,
+                            sampleRate);
+    }
+
     void init(float newSampleRate)
     {
         this->sampleRate = newSampleRate;
@@ -448,8 +455,12 @@ protected:
         this->fmod3 = 0.0f;
         this->ffreq = 1.0f;
         this->fq = 0.0f;
-        this->freq1 = 0.0f;
-        this->freq2 = 0.0f;
+        this->baseFreq1 = 0.0f;
+        this->baseFreq2 = 0.0f;
+        this->globalBendMul = 1.0f;
+        this->noteBendMul = 1.0f;
+        this->spreadMul1 = 1.0f;
+        this->spreadMul2 = 1.0f;
         this->velocity = 0.0f;
         this->wt1_idx = 0;
         this->wt2_idx = 0;
@@ -464,8 +475,12 @@ protected:
 	float vol1;
 	float vol2;
     float sampleRate = 44100.0f;
-    float freq1 = 0.0f;
-    float freq2 = 0.0f;
+    float baseFreq1 = 0.0f;
+    float baseFreq2 = 0.0f;
+    float globalBendMul = 1.0f;
+    float noteBendMul = 1.0f;
+    float spreadMul1 = 1.0f;
+    float spreadMul2 = 1.0f;
     float velocity = 0.0f;
     float modulation;
     float pwm;

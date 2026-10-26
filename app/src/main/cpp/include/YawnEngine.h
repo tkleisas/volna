@@ -25,6 +25,8 @@ public:
     static constexpr int kInstrumentCount = 2;
     static constexpr int kMidiEffectCount = 8;
     static constexpr int kAudioEffectCount = 8;
+    static constexpr int kMaxMidiChainSlots = 8;
+    static constexpr int kMaxAudioChainSlots = 8;
 
     enum class InstrumentKind : int {
         Wavetable = 0,
@@ -57,6 +59,7 @@ public:
     float instrumentParamValue(int index) const;
     void setInstrumentParam(int index, float value);
 
+    // Effect type catalog (used by the Add-effect picker).
     static int midiEffectCount() { return kMidiEffectCount; }
     static const char* midiEffectName(int index);
     static const char* midiEffectId(int index);
@@ -89,11 +92,58 @@ public:
     bool audioEffectBypassed(int index) const;
     void setAudioEffectBypassed(int index, bool bypassed);
 
+    // MIDI effect chain.
+    int midiChainSize() const { return mMidiChainCount; }
+    const char* midiChainName(int slot) const;
+    const char* midiChainId(int slot) const;
+    bool midiChainBypassed(int slot) const;
+    void setMidiChainBypassed(int slot, bool bypassed);
+    int addMidiEffect(int type);
+    bool removeMidiEffect(int slot);
+    bool moveMidiEffect(int slot, int delta);
+    int midiChainParamCount(int slot) const;
+    const char* midiChainParamName(int slot, int index) const;
+    float midiChainParamMin(int slot, int index) const;
+    float midiChainParamMax(int slot, int index) const;
+    float midiChainParamDefault(int slot, int index) const;
+    bool midiChainParamIsBoolean(int slot, int index) const;
+    int midiChainParamLabelCount(int slot, int index) const;
+    const char* midiChainParamLabel(int slot, int index, int label) const;
+    float midiChainParamValue(int slot, int index) const;
+    void setMidiChainParam(int slot, int index, float value);
+
+    // Audio effect chain.
+    int audioChainSize() const { return mAudioChainCount; }
+    const char* audioChainName(int slot) const;
+    const char* audioChainId(int slot) const;
+    bool audioChainBypassed(int slot) const;
+    void setAudioChainBypassed(int slot, bool bypassed);
+    int addAudioEffect(int type);
+    bool removeAudioEffect(int slot);
+    bool moveAudioEffect(int slot, int delta);
+    int audioChainParamCount(int slot) const;
+    const char* audioChainParamName(int slot, int index) const;
+    float audioChainParamMin(int slot, int index) const;
+    float audioChainParamMax(int slot, int index) const;
+    float audioChainParamDefault(int slot, int index) const;
+    bool audioChainParamIsBoolean(int slot, int index) const;
+    int audioChainParamLabelCount(int slot, int index) const;
+    const char* audioChainParamLabel(int slot, int index, int label) const;
+    float audioChainParamValue(int slot, int index) const;
+    void setAudioChainParam(int slot, int index, float value);
+
+    // Full synth state (instrument banks, chains, bypass, params, tempo).
+    std::string saveState() const;
+    bool restoreState(const std::string& json, std::string* error);
+
+    float tempo() const { return static_cast<float>(mTransport.bpm); }
+    float masterVolume() const { return mMasterVolume; }
     void setTempo(float bpm);
     void setMasterVolume(float volume);
 
     void noteOn(int channel, int note, int velocity);
     void noteOff(int channel, int note, int velocity);
+    void notePitch(int channel, int note, float bendSemitones);
     void pitchBend(int channel, int lsb, int msb);
     void controlChange(int channel, int control, int value);
     void polyPressure(int channel, int note, int pressure);
@@ -116,6 +166,9 @@ public:
     float* wavetableFrame(float position, float* out, int length) const;
 
     const float* waveformData() const { return mWaveform; }
+    float dspLoad() const { return mDspLoad.load(std::memory_order_relaxed); }
+    float dspPeak() const { return mDspPeak.load(std::memory_order_relaxed); }
+    void resetDspPeak() { mDspPeak.store(0.0f, std::memory_order_relaxed); }
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream,
                                           void* audioData,
@@ -130,6 +183,20 @@ private:
         std::array<std::atomic<float>, kMaxParams> values{};
     };
 
+    struct MidiChainSlot {
+        std::unique_ptr<yawn::midi::MidiEffect> effect;
+        ParamState params;
+        std::atomic<bool> bypassed{true};
+        int type = 0;
+    };
+
+    struct AudioChainSlot {
+        std::unique_ptr<yawn::effects::AudioEffect> effect;
+        ParamState params;
+        std::atomic<bool> bypassed{true};
+        int type = 0;
+    };
+
     void oboeInit();
     bool audioIsRunning() const;
     void push(const EngineEvent& event);
@@ -137,11 +204,19 @@ private:
     void dispatchEvent(const EngineEvent& event, int numFrames);
 
     std::unique_ptr<yawn::instruments::Instrument> createInstrument(int index) const;
+    ParamState& currentInstrumentParams();
+    const ParamState& currentInstrumentParams() const;
+    void initInstrumentBanks();
+    std::unique_ptr<yawn::midi::MidiEffect> createMidiEffect(int type) const;
+    std::unique_ptr<yawn::effects::AudioEffect> createAudioEffect(int type) const;
     void applyInstrumentDefaults();
-    void applyMidiEffectDefaults();
-    void applyAudioEffectDefaults();
-    void initMidiEffects();
-    void initAudioEffects();
+    void initMidiChain();
+    void initAudioChain();
+    void clearMidiChain();
+    void clearAudioChain();
+    void resetChainEffects();
+    int appendMidiEffect(int type, bool bypassed);
+    int appendAudioEffect(int type, bool bypassed);
 
     void handleNoteOn(int channel, int note, int velocity);
     void handleNoteOff(int channel, int note);
@@ -154,20 +229,24 @@ private:
     void renderLoop(float* left, float* right, int numFrames);
     void recordSamples(const float* left, const float* right, int numFrames);
 
-    static void clampFrameIndexes(int effect, int index, int& paramCount);
     const yawn::ParameterInfo* instrumentInfo(int index) const;
     const yawn::ParameterInfo* midiInfo(int effect, int index) const;
     const yawn::ParameterInfo* audioInfo(int effect, int index) const;
+    const yawn::ParameterInfo* midiChainInfo(int slot, int index) const;
+    const yawn::ParameterInfo* audioChainInfo(int slot, int index) const;
+    int findAudioChainSlot(int type) const;
+    void applyAudioChainParam(int slot, int index, float value);
 
     std::unique_ptr<yawn::instruments::Instrument> mInstrument;
     std::unique_ptr<yawn::instruments::Instrument> mMetadataInstruments[kInstrumentCount];
-    std::array<std::unique_ptr<yawn::midi::MidiEffect>, kMidiEffectCount> mMidiEffects;
-    std::array<std::unique_ptr<yawn::effects::AudioEffect>, kAudioEffectCount> mAudioEffects;
-    std::array<std::atomic<bool>, kMidiEffectCount> mMidiBypass{};
-    std::array<std::atomic<bool>, kAudioEffectCount> mAudioBypass{};
-    ParamState mInstrumentParams;
-    std::array<ParamState, kMidiEffectCount> mMidiParams;
-    std::array<ParamState, kAudioEffectCount> mAudioParams;
+    std::array<ParamState, kInstrumentCount> mInstrumentParamsByType;
+    std::array<std::unique_ptr<yawn::midi::MidiEffect>, kMidiEffectCount> mMidiCatalog;
+    std::array<std::unique_ptr<yawn::effects::AudioEffect>, kAudioEffectCount> mAudioCatalog;
+
+    std::array<std::unique_ptr<MidiChainSlot>, kMaxMidiChainSlots> mMidiChain;
+    int mMidiChainCount = 0;
+    std::array<std::unique_ptr<AudioChainSlot>, kMaxAudioChainSlots> mAudioChain;
+    int mAudioChainCount = 0;
 
     EngineEventQueue mEvents;
     yawn::midi::MidiBuffer mMidiBuffer;
@@ -179,6 +258,9 @@ private:
     oboe::ManagedStream mStream;
     std::mutex mControlMutex;
     std::atomic<bool> mInitialized{false};
+    std::atomic<bool> mSuspended{false};
+    std::atomic<float> mDspLoad{0.0f};
+    std::atomic<float> mDspPeak{0.0f};
     std::atomic<bool> mInstrumentDirty{false};
     int mInstrumentIndex = 0;
     int mSampleRate = 48000;

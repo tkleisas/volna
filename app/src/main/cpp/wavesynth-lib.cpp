@@ -336,6 +336,50 @@ Java_org_bokontep_wavesynth_SynthEngine_sendMidiNoteOff(JNIEnv* /* env */,
     return 0;
 }
 
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getDspLoad(JNIEnv* /* env */,
+                                                   jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->dspLoad();
+    }
+    return engine != nullptr ? engine->getDspLoad() : 0.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getDspPeak(JNIEnv* /* env */,
+                                                   jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->dspPeak();
+    }
+    return engine != nullptr ? engine->getDspPeak() : 0.0f;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_resetDspPeak(JNIEnv* /* env */,
+                                                     jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        gYawnEngine->resetDspPeak();
+    } else if (engine != nullptr) {
+        engine->resetDspPeak();
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_sendMidiNotePitch(
+    JNIEnv* /* env */, jobject /* thiz */, jint channel, jint note,
+    jfloat bend_semitones) {
+    if (activeYawnEngine() != nullptr) {
+        gYawnEngine->notePitch(channel, note, bend_semitones);
+        return 0;
+    }
+    if (engine == nullptr) {
+        return -1;
+    }
+    engine->handleNotePitch(channel, note, bend_semitones);
+    return 0;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_org_bokontep_wavesynth_SynthEngine_sendMidiNoteSpread(JNIEnv* /* env */,
                                                            jobject /* thiz */,
@@ -1047,6 +1091,47 @@ Java_org_bokontep_wavesynth_SynthEngine_resetYawnWavetable(
     return 0;
 }
 
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnTempo(JNIEnv* /* env */,
+                                                     jobject /* thiz */) {
+    return gYawnEngine != nullptr ? gYawnEngine->tempo() : 120.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMasterVolume(
+    JNIEnv* /* env */, jobject /* thiz */) {
+    return gYawnEngine != nullptr ? gYawnEngine->masterVolume() : 0.8f;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_saveYawnState(
+    JNIEnv* env, jobject /* thiz */) {
+    if (gYawnEngine == nullptr) {
+        return yawnString(env, "");
+    }
+    return yawnString(env, gYawnEngine->saveState().c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_restoreYawnState(
+    JNIEnv* env, jobject /* thiz */, jstring state) {
+    if (gYawnEngine == nullptr) {
+        return yawnString(env, "YAWN engine is not initialized");
+    }
+    if (state == nullptr) {
+        return yawnString(env, "No synth state supplied");
+    }
+    const char* chars = env->GetStringUTFChars(state, nullptr);
+    std::string error;
+    const bool ok = gYawnEngine->restoreState(chars, &error);
+    env->ReleaseStringUTFChars(state, chars);
+    if (!ok) {
+        return yawnString(env, error.empty() ? "Could not restore synth state"
+                                             : error.c_str());
+    }
+    return nullptr;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_bokontep_wavesynth_SynthEngine_hasYawnCustomWavetable(
     JNIEnv* /* env */, jobject /* thiz */) {
@@ -1068,4 +1153,260 @@ Java_org_bokontep_wavesynth_SynthEngine_getYawnWavetableFrame(
     }
     env->SetFloatArrayRegion(result, 0, 256, frame);
     return result;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainSize(
+    JNIEnv* /* env */, jobject /* thiz */) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainSize() : 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainName(
+    JNIEnv* env, jobject /* thiz */, jint slot) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->midiChainName(slot)
+                               : "");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainId(
+    JNIEnv* env, jobject /* thiz */, jint slot) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->midiChainId(slot)
+                               : "");
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_isYawnMidiChainBypassed(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot) {
+    return gYawnEngine != nullptr && gYawnEngine->midiChainBypassed(slot)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setYawnMidiChainBypassed(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jboolean bypassed) {
+    if (gYawnEngine != nullptr) {
+        gYawnEngine->setMidiChainBypassed(slot, bypassed == JNI_TRUE);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_addYawnMidiEffect(
+    JNIEnv* /* env */, jobject /* thiz */, jint type) {
+    return gYawnEngine != nullptr ? gYawnEngine->addMidiEffect(type) : -1;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_removeYawnMidiEffect(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot) {
+    return gYawnEngine != nullptr && gYawnEngine->removeMidiEffect(slot)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_moveYawnMidiEffect(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint delta) {
+    return gYawnEngine != nullptr && gYawnEngine->moveMidiEffect(slot, delta)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamCount(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainParamCount(slot) : 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamName(
+    JNIEnv* env, jobject /* thiz */, jint slot, jint index) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->midiChainParamName(slot, index)
+                               : "");
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamMin(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainParamMin(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamMax(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainParamMax(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamDefault(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainParamDefault(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_isYawnMidiChainParamBoolean(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr &&
+                   gYawnEngine->midiChainParamIsBoolean(slot, index)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamLabelCount(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainParamLabelCount(slot, index) : 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamLabel(
+    JNIEnv* env, jobject /* thiz */, jint slot, jint index, jint label) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->midiChainParamLabel(slot, index, label)
+                               : "");
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnMidiChainParamValue(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->midiChainParamValue(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setYawnMidiChainParam(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index,
+    jfloat value) {
+    if (gYawnEngine != nullptr) {
+        gYawnEngine->setMidiChainParam(slot, index, value);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainSize(
+    JNIEnv* /* env */, jobject /* thiz */) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainSize() : 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainName(
+    JNIEnv* env, jobject /* thiz */, jint slot) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->audioChainName(slot)
+                               : "");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainId(
+    JNIEnv* env, jobject /* thiz */, jint slot) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->audioChainId(slot)
+                               : "");
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_isYawnAudioChainBypassed(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot) {
+    return gYawnEngine != nullptr && gYawnEngine->audioChainBypassed(slot)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setYawnAudioChainBypassed(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jboolean bypassed) {
+    if (gYawnEngine != nullptr) {
+        gYawnEngine->setAudioChainBypassed(slot, bypassed == JNI_TRUE);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_addYawnAudioEffect(
+    JNIEnv* /* env */, jobject /* thiz */, jint type) {
+    return gYawnEngine != nullptr ? gYawnEngine->addAudioEffect(type) : -1;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_removeYawnAudioEffect(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot) {
+    return gYawnEngine != nullptr && gYawnEngine->removeAudioEffect(slot)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_moveYawnAudioEffect(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint delta) {
+    return gYawnEngine != nullptr && gYawnEngine->moveAudioEffect(slot, delta)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamCount(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainParamCount(slot) : 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamName(
+    JNIEnv* env, jobject /* thiz */, jint slot, jint index) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->audioChainParamName(slot, index)
+                               : "");
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamMin(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainParamMin(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamMax(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainParamMax(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamDefault(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainParamDefault(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_isYawnAudioChainParamBoolean(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr &&
+                   gYawnEngine->audioChainParamIsBoolean(slot, index)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamLabelCount(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainParamLabelCount(slot, index) : 0;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamLabel(
+    JNIEnv* env, jobject /* thiz */, jint slot, jint index, jint label) {
+    return yawnString(env, gYawnEngine != nullptr
+                               ? gYawnEngine->audioChainParamLabel(slot, index, label)
+                               : "");
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getYawnAudioChainParamValue(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index) {
+    return gYawnEngine != nullptr ? gYawnEngine->audioChainParamValue(slot, index) : 0.0f;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setYawnAudioChainParam(
+    JNIEnv* /* env */, jobject /* thiz */, jint slot, jint index,
+    jfloat value) {
+    if (gYawnEngine != nullptr) {
+        gYawnEngine->setAudioChainParam(slot, index, value);
+    }
+    return 0;
 }

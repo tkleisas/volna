@@ -75,6 +75,10 @@ public class SynthEngine {
     public native int sendMidiBend(int channel, int low, int high);
     public native int sendMidiNoteSpread(int channel, int note, int spread);
     public native int sendMidiChangeNote(int channel, int oldnote, int newnote, int velocity);
+    public native int sendMidiNotePitch(int channel, int note, float bendSemitones);
+    public native float getDspLoad();
+    public native float getDspPeak();
+    public native int resetDspPeak();
     public native int selectWaveform(int channel, int osc, int note,  int wave);
     public native float[] getWaveform();
     public native float[] getWavetable(int index);
@@ -143,6 +147,44 @@ public class SynthEngine {
     public native boolean isYawnAudioEffectBypassed(int effect);
     public native int setYawnAudioEffectBypassed(int effect, boolean bypassed);
 
+    public native int getYawnMidiChainSize();
+    public native String getYawnMidiChainName(int slot);
+    public native String getYawnMidiChainId(int slot);
+    public native boolean isYawnMidiChainBypassed(int slot);
+    public native int setYawnMidiChainBypassed(int slot, boolean bypassed);
+    public native int addYawnMidiEffect(int type);
+    public native boolean removeYawnMidiEffect(int slot);
+    public native boolean moveYawnMidiEffect(int slot, int delta);
+    public native int getYawnMidiChainParamCount(int slot);
+    public native String getYawnMidiChainParamName(int slot, int index);
+    public native float getYawnMidiChainParamMin(int slot, int index);
+    public native float getYawnMidiChainParamMax(int slot, int index);
+    public native float getYawnMidiChainParamDefault(int slot, int index);
+    public native boolean isYawnMidiChainParamBoolean(int slot, int index);
+    public native int getYawnMidiChainParamLabelCount(int slot, int index);
+    public native String getYawnMidiChainParamLabel(int slot, int index, int label);
+    public native float getYawnMidiChainParamValue(int slot, int index);
+    public native int setYawnMidiChainParam(int slot, int index, float value);
+
+    public native int getYawnAudioChainSize();
+    public native String getYawnAudioChainName(int slot);
+    public native String getYawnAudioChainId(int slot);
+    public native boolean isYawnAudioChainBypassed(int slot);
+    public native int setYawnAudioChainBypassed(int slot, boolean bypassed);
+    public native int addYawnAudioEffect(int type);
+    public native boolean removeYawnAudioEffect(int slot);
+    public native boolean moveYawnAudioEffect(int slot, int delta);
+    public native int getYawnAudioChainParamCount(int slot);
+    public native String getYawnAudioChainParamName(int slot, int index);
+    public native float getYawnAudioChainParamMin(int slot, int index);
+    public native float getYawnAudioChainParamMax(int slot, int index);
+    public native float getYawnAudioChainParamDefault(int slot, int index);
+    public native boolean isYawnAudioChainParamBoolean(int slot, int index);
+    public native int getYawnAudioChainParamLabelCount(int slot, int index);
+    public native String getYawnAudioChainParamLabel(int slot, int index, int label);
+    public native float getYawnAudioChainParamValue(int slot, int index);
+    public native int setYawnAudioChainParam(int slot, int index, float value);
+
     public native int setYawnTempo(float bpm);
     public native int setYawnMasterVolume(float volume);
     public native int sendYawnPolyPressure(int channel, int note, int pressure);
@@ -152,6 +194,10 @@ public class SynthEngine {
     public native String saveYawnWavetable(String path);
     public native int resetYawnWavetable();
     public native boolean hasYawnCustomWavetable();
+    public native float getYawnTempo();
+    public native float getYawnMasterVolume();
+    public native String saveYawnState();
+    public native String restoreYawnState(String state);
     public native float[] getYawnWavetableFrame(float position);
 
     public int getEngineMode() {
