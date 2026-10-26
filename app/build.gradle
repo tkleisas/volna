@@ -11,6 +11,22 @@ def getCommitHash = { ->
     }
     return stdout.toString().trim()
 }
+
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (!keystorePropertiesFile.exists()) {
+    keystorePropertiesFile = new File(System.getProperty("user.home"), ".volna/keystore.properties")
+}
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def signingValue = { String environmentName, String propertyName ->
+    return System.getenv(environmentName) ?: keystoreProperties.getProperty(propertyName)
+}
+
+def releaseStorePath = signingValue("RELEASE_KEYSTORE_PATH", "storeFile")
+
 android {
     namespace 'org.bokontep.wavesynth'
     compileSdk 34
@@ -24,8 +40,8 @@ android {
         applicationId "org.bokontep.wavesynth"
         minSdk 23
         targetSdk 34
-        versionCode 5
-        versionName "0.9.3-"+getCommitHash()
+        versionCode 6
+        versionName "0.9.4-"+getCommitHash()
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
@@ -35,8 +51,22 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            if (releaseStorePath) {
+                storeFile file(releaseStorePath)
+                storePassword signingValue("RELEASE_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias signingValue("RELEASE_KEY_ALIAS", "keyAlias")
+                keyPassword signingValue("RELEASE_KEY_PASSWORD", "keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseStorePath) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             debuggable false
@@ -53,6 +83,11 @@ android {
             path "src/main/cpp/CMakeLists.txt"
             version "3.22.1"
 
+        }
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
     compileOptions {

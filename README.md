@@ -423,7 +423,8 @@ app/src/main/cpp/
   wavesynth-lib.cpp          JNI boundary
 app/src/test/                JVM unit tests
 scripts/sync_yawn_dsp.sh     refresh vendored YAWN DSP
-.github/workflows/android.yml CI build + unit tests
+scripts/check_16kb_page_size.sh  release APK/AAB page-size verification
+.github/workflows/android.yml CI build, tests, and signed releases
 ```
 
 ## Build and test
@@ -447,6 +448,19 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 You can also open the project in Android Studio, install the NDK above, and
 build the `app` configuration.
 
+Release builds read signing values from `~/.volna/keystore.properties` (or the
+`RELEASE_KEYSTORE_PATH`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and
+`RELEASE_KEY_PASSWORD` environment variables). The keystore and properties file
+are deliberately kept outside the repository.
+
+```sh
+./gradlew :app:assembleRelease :app:bundleRelease
+```
+
+Signed release artifacts are built for tags matching `v*`. CI verifies the APK
+and AAB signatures, checks that the 64-bit native libraries use 16 KB page
+alignment, and attaches both files to the GitHub release.
+
 ## Testing and CI
 
 - JVM unit tests cover `.vwt` parsing/mapping, microtonal pitch splitting,
@@ -454,8 +468,9 @@ build the `app` configuration.
   spectrum/FFT analyzer.
 - Native YAWN tests cover per-note pitch bend, MPE translation, and RTP-MIDI
   parsing.
-- GitHub Actions builds the debug APK and runs the unit tests on every push and
-  pull request.
+- GitHub Actions runs unit tests, lint, and the debug build on every push and
+  pull request. Tagged builds also produce signed APK/AAB release assets and
+  verify 16 KB page-size compatibility.
 
 ## Known limitations and roadmap
 

@@ -12,3 +12,8 @@
 /captures
 .externalNativeBuild
 .cxx
+
+keystore.properties
+*.jks
+*.keystore
+*.p12

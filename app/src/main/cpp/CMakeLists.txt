@@ -7,6 +7,9 @@ cmake_minimum_required(VERSION 3.4.1)
 
 project(wavesynth)
 
+# Align native libraries for devices and stores that use 16 KB pages.
+add_link_options("-Wl,-z,max-page-size=16384")
+
 # Set up oboe before using it
 set(OBOE_DIR ./oboe)
 add_subdirectory(${OBOE_DIR} ./oboe)
