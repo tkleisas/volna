@@ -1,7 +1,7 @@
 package org.bokontep.wavesynth;
 
 import android.content.Context;
-import android.graphics.Color;
+import android.graphics.Typeface;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -20,9 +20,13 @@ public final class CollapsibleSection {
         root.setOrientation(LinearLayout.VERTICAL);
 
         header = new TextView(context);
-        header.setTextSize(22);
-        header.setTextColor(Color.LTGRAY);
-        header.setPadding(0, 24, 0, 8);
+        header.setTextSize(12);
+        header.setTextColor(context.getColor(R.color.text_primary));
+        header.setTypeface(Typeface.create("sans-serif-medium",
+                Typeface.NORMAL));
+        header.setLetterSpacing(0.05f);
+        header.setIncludeFontPadding(false);
+        header.setPadding(0, dp(context, 12), 0, dp(context, 8));
         header.setClickable(true);
         header.setOnClickListener(v -> setExpanded(!this.expanded));
 
@@ -73,6 +77,11 @@ public final class CollapsibleSection {
     }
 
     private void updateHeader() {
-        header.setText((expanded ? "▼ " : "▶ ") + title);
+        header.setText((expanded ? "▾ " : "▸ ") + title);
+    }
+
+    private static int dp(Context context, int value) {
+        return Math.round(value
+                * context.getResources().getDisplayMetrics().density);
     }
 }

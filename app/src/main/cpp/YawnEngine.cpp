@@ -84,6 +84,19 @@ void YawnEngine::init(float sampleRate, int instrumentIndex) {
     mBeatPosition = 0.0;
     mSamplePosition = 0;
 
+    mSafetyLimiterEffect.init(mSampleRate, kMaxFrames);
+    mSafetyLimiterEffect.setParameter(
+        yawn::effects::Limiter::kCeiling, -1.0f);
+    mSafetyLimiterEffect.setParameter(
+        yawn::effects::Limiter::kRelease, 80.0f);
+    mSafetyLimiterEffect.setParameter(
+        yawn::effects::Limiter::kLookahead, 3.0f);
+    mSafetyLimiterEffect.reset();
+    mSafetyLimiter.store(true);
+    mPolyphonyLeveling.store(true);
+    mPolyphonyGain = 1.0f;
+    clearActiveNotes();
+
     mMixBuffer.assign(static_cast<size_t>(kMaxFrames) * 2, 0.0f);
     mRecordCapacity = mSampleRate * 60;
     mRecordBuffer.assign(static_cast<size_t>(mRecordCapacity) * 2, 0.0f);
@@ -93,7 +106,23 @@ void YawnEngine::init(float sampleRate, int instrumentIndex) {
     mPlayIndex = 0;
     mRecording = false;
     mPlayingLoop = false;
-    mFadeSamples = mSampleRate / 100; // 10 ms fade
+    mCrossfadeSamples = mSampleRate / 50; // 20 ms loop seam
+    mPlayFadeSamples = mSampleRate / 100; // 10 ms first-start fade
+    mPlayFadeRemaining = 0;
+    mLoopRecording.store(false);
+    mLoopPlaying.store(false);
+    mLoopRecordLength.store(0);
+    mLoopPlayIndex.store(0);
+    mLoopPlayStart.store(0);
+    mLoopPlayEnd.store(0);
+
+    mModSmoothCoeff = 1.0f - std::exp(
+        -1.0f / (0.02f * static_cast<float>(mSampleRate)));
+    for (auto& source : mModSources) {
+        source.store(0.0f);
+    }
+    mModSmoothed.fill(0.0f);
+    mLastModTargetCount = 0;
 
     mInstrumentIndex = std::clamp(instrumentIndex, 0, kInstrumentCount - 1);
     initInstrumentBanks();
@@ -165,7 +194,25 @@ bool YawnEngine::audioIsRunning() const {
 
 void YawnEngine::pauseAudio() {
     mSuspended.store(true);
-    if (mStream) mStream->requestStop();
+    if (mStream) {
+        mStream->stop();
+    }
+    if (mInstrument) {
+        mInstrument->reset();
+    }
+    resetChainEffects();
+    mEvents.clear();
+    mMidiBuffer.clear();
+    clearActiveNotes();
+    mLastModTargetCount = 0;
+    mPolyphonyGain = 1.0f;
+    mRecording = false;
+    mPlayingLoop = false;
+    mPlayFadeRemaining = 0;
+    mLoopRecording.store(false);
+    mLoopPlaying.store(false);
+    mLoopPlayIndex.store(0);
+    mSafetyLimiterEffect.reset();
 }
 
 void YawnEngine::resumeAudio() {
@@ -363,6 +410,7 @@ bool YawnEngine::selectInstrument(int index) {
     resetChainEffects();
     mEvents.clear();
     mMidiBuffer.clear();
+    mLastModTargetCount = 0;
 
     if (wasRunning && mStream) mStream->requestStart();
     return true;
@@ -1268,6 +1316,73 @@ void YawnEngine::setRecord(bool record) {
     push(event);
 }
 
+void YawnEngine::setSafetyLimiter(bool enabled) {
+    EngineEvent event;
+    event.type = EngineEvent::Type::SetSafetyLimiter;
+    event.a = enabled ? 1 : 0;
+    push(event);
+}
+
+void YawnEngine::setPolyphonyLeveling(bool enabled) {
+    EngineEvent event;
+    event.type = EngineEvent::Type::SetPolyphonyLeveling;
+    event.a = enabled ? 1 : 0;
+    push(event);
+}
+
+void YawnEngine::setModSource(int source, float value) {
+    if (source < 0 || source >= kModSourceCount) {
+        return;
+    }
+    mModSources[source].store(std::clamp(value, -1.0f, 1.0f),
+                              std::memory_order_relaxed);
+}
+
+void YawnEngine::setModSlot(int slot, bool enabled, int source,
+                            int targetType, int targetSlot,
+                            int targetParam, float amount) {
+    if (slot < 0 || slot >= kMaxModSlots) {
+        return;
+    }
+    EngineEvent event;
+    event.type = EngineEvent::Type::SetModSlot;
+    event.i = slot;
+    event.j = enabled ? 1 : 0;
+    event.a = static_cast<uint8_t>(std::max(0, std::min(255, source)));
+    event.b = static_cast<uint8_t>(std::max(0, std::min(255, targetType)));
+    event.c = static_cast<uint8_t>(std::max(0, std::min(255, targetSlot)));
+    event.d = static_cast<uint8_t>(std::max(0, std::min(255, targetParam)));
+    event.f = std::clamp(amount, -1.0f, 1.0f);
+    push(event);
+}
+
+void YawnEngine::clearLoop() {
+    EngineEvent event;
+    event.type = EngineEvent::Type::ClearLoop;
+    push(event);
+}
+
+float YawnEngine::loopRecordProgress() const {
+    if (mRecordCapacity <= 0) {
+        return 0.0f;
+    }
+    const float progress = static_cast<float>(mLoopRecordLength.load()) /
+                           static_cast<float>(mRecordCapacity);
+    return std::clamp(progress, 0.0f, 1.0f);
+}
+
+float YawnEngine::loopPlayProgress() const {
+    const int start = mLoopPlayStart.load();
+    const int end = mLoopPlayEnd.load();
+    if (end <= start) {
+        return 0.0f;
+    }
+    const int index = mLoopPlayIndex.load();
+    const float progress = static_cast<float>(index - start) /
+                           static_cast<float>(end - start);
+    return std::clamp(progress, 0.0f, 1.0f);
+}
+
 void YawnEngine::setDelayLevel(int level) {
     EngineEvent event;
     event.type = EngineEvent::Type::SetDelayLevel;
@@ -1434,6 +1549,44 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
         case EngineEvent::Type::SetRecord:
             doSetRecord(event.a != 0);
             break;
+        case EngineEvent::Type::SetSafetyLimiter:
+            mSafetyLimiter.store(event.a != 0);
+            if (event.a != 0) {
+                mSafetyLimiterEffect.reset();
+            }
+            break;
+        case EngineEvent::Type::SetPolyphonyLeveling:
+            mPolyphonyLeveling.store(event.a != 0);
+            if (event.a == 0) {
+                mPolyphonyGain = 1.0f;
+            }
+            break;
+        case EngineEvent::Type::ClearLoop:
+            mRecording = false;
+            mPlayingLoop = false;
+            mRecordLength = 0;
+            mPlayIndex = 0;
+            mPlayStart = 0;
+            mPlayEnd = 0;
+            mPlayFadeRemaining = 0;
+            mLoopRecording.store(false);
+            mLoopPlaying.store(false);
+            mLoopRecordLength.store(0);
+            mLoopPlayIndex.store(0);
+            mLoopPlayStart.store(0);
+            mLoopPlayEnd.store(0);
+            break;
+        case EngineEvent::Type::SetModSlot:
+            if (event.i >= 0 && event.i < kMaxModSlots) {
+                ModSlot& modSlot = mModSlots[event.i];
+                modSlot.enabled = event.j != 0;
+                modSlot.source = event.a;
+                modSlot.targetType = event.b;
+                modSlot.targetSlot = event.c;
+                modSlot.targetParam = event.d;
+                modSlot.amount = std::clamp(event.f, -1.0f, 1.0f);
+            }
+            break;
         case EngineEvent::Type::SetDelayLevel: {
             const int slot = findAudioChainSlot(0);
             if (slot >= 0) {
@@ -1581,8 +1734,15 @@ void YawnEngine::doSetPlay(bool play) {
         mPlayEnd = mRecordLength;
         mPlayIndex = mPlayStart;
         mPlayingLoop = true;
+        mPlayFadeRemaining = mPlayFadeSamples;
+        mLoopPlaying.store(true);
+        mLoopPlayStart.store(mPlayStart);
+        mLoopPlayEnd.store(mPlayEnd);
+        mLoopPlayIndex.store(mPlayIndex);
     } else {
         mPlayingLoop = false;
+        mPlayFadeRemaining = 0;
+        mLoopPlaying.store(false);
     }
 }
 
@@ -1592,33 +1752,62 @@ void YawnEngine::doSetRecord(bool record) {
         mPlayIndex = 0;
         mPlayingLoop = false;
         mRecording = true;
+        mPlayFadeRemaining = 0;
+        mLoopRecording.store(true);
+        mLoopPlaying.store(false);
+        mLoopRecordLength.store(0);
+        mLoopPlayIndex.store(0);
+        mLoopPlayStart.store(0);
+        mLoopPlayEnd.store(0);
     } else {
         mRecording = false;
+        mLoopRecording.store(false);
+        mLoopRecordLength.store(mRecordLength);
     }
 }
 
 void YawnEngine::renderLoop(float* left, float* right, int numFrames) {
     if (!mPlayingLoop || mPlayEnd <= mPlayStart) return;
+    const int loopLength = mPlayEnd - mPlayStart;
+    const int crossfade = std::min(mCrossfadeSamples, loopLength / 2);
+    const int crossfadeStart = mPlayEnd - crossfade;
     for (int i = 0; i < numFrames; ++i) {
-        if (mPlayIndex >= mPlayEnd) mPlayIndex = mPlayStart;
-        float gain = 1.0f;
-        if (mFadeSamples > 0) {
-            const int fromStart = mPlayIndex - mPlayStart;
-            const int fromEnd = mPlayEnd - mPlayIndex;
-            if (fromStart < mFadeSamples) {
-                gain = static_cast<float>(fromStart) / mFadeSamples;
+        if (mPlayIndex < mPlayStart || mPlayIndex >= mPlayEnd) {
+            mPlayIndex = mPlayStart;
+        }
+        float sampleL;
+        float sampleR;
+        if (crossfade > 0 && mPlayIndex >= crossfadeStart) {
+            const int k = mPlayIndex - crossfadeStart;
+            const float t = static_cast<float>(k + 1) /
+                            static_cast<float>(crossfade);
+            const int head = mPlayStart + k;
+            sampleL = mRecordBuffer[mPlayIndex * 2] * (1.0f - t) +
+                      mRecordBuffer[head * 2] * t;
+            sampleR = mRecordBuffer[mPlayIndex * 2 + 1] * (1.0f - t) +
+                      mRecordBuffer[head * 2 + 1] * t;
+            ++mPlayIndex;
+            if (mPlayIndex >= mPlayEnd) {
+                mPlayIndex = mPlayStart + crossfade;
             }
-            if (fromEnd < mFadeSamples) {
-                gain = std::min(gain,
-                                static_cast<float>(fromEnd) / mFadeSamples);
+        } else {
+            sampleL = mRecordBuffer[mPlayIndex * 2];
+            sampleR = mRecordBuffer[mPlayIndex * 2 + 1];
+            ++mPlayIndex;
+            if (mPlayIndex >= mPlayEnd) {
+                mPlayIndex = mPlayStart + crossfade;
             }
         }
-        const int base = mPlayIndex * 2;
-        left[i * 2] += mRecordBuffer[base] * gain;
-        right[i * 2] += mRecordBuffer[base + 1] * gain;
-        ++mPlayIndex;
-        if (mPlayIndex >= mPlayEnd) mPlayIndex = mPlayStart;
+        float startGain = 1.0f;
+        if (mPlayFadeRemaining > 0 && mPlayFadeSamples > 0) {
+            startGain = 1.0f - static_cast<float>(mPlayFadeRemaining) /
+                               static_cast<float>(mPlayFadeSamples);
+            --mPlayFadeRemaining;
+        }
+        left[i * 2] += sampleL * startGain;
+        right[i * 2] += sampleR * startGain;
     }
+    mLoopPlayIndex.store(mPlayIndex);
 }
 
 void YawnEngine::recordSamples(const float* left, const float* right,
@@ -1627,12 +1816,169 @@ void YawnEngine::recordSamples(const float* left, const float* right,
     for (int i = 0; i < numFrames; ++i) {
         if (mRecordLength >= mRecordCapacity) {
             mRecording = false;
+            mLoopRecording.store(false);
+            mLoopRecordLength.store(mRecordLength);
             return;
         }
         const int base = mRecordLength * 2;
         mRecordBuffer[base] = left[i * 2];
         mRecordBuffer[base + 1] = right[i * 2];
         ++mRecordLength;
+    }
+    mLoopRecordLength.store(mRecordLength);
+}
+
+void YawnEngine::clearActiveNotes() {
+    for (auto& channel : mActiveNotes) {
+        channel.fill(false);
+    }
+}
+
+void YawnEngine::updateActiveNotes(
+        const yawn::midi::MidiBuffer& buffer) {
+    for (const auto& msg : buffer) {
+        const int channel = msg.channel & 15;
+        const int note = msg.note & 127;
+        if (msg.type == yawn::midi::MidiMessage::Type::NoteOn) {
+            mActiveNotes[channel][note] = msg.velocity > 0;
+        } else if (msg.type == yawn::midi::MidiMessage::Type::NoteOff) {
+            mActiveNotes[channel][note] = false;
+        } else if (msg.type == yawn::midi::MidiMessage::Type::ControlChange
+                && (msg.ccNumber == 120 || msg.ccNumber == 123)) {
+            clearActiveNotes();
+        }
+    }
+}
+
+int YawnEngine::activeNoteCount() const {
+    int count = 0;
+    for (const auto& channel : mActiveNotes) {
+        for (bool active : channel) {
+            count += active ? 1 : 0;
+        }
+    }
+    return count;
+}
+
+bool YawnEngine::applyModTarget(int type, int slot, int param, float offset,
+                                bool restoreBase) {
+    if (type == 0) {
+        const auto* info = instrumentInfo(param);
+        if (!info || !mInstrument) {
+            return false;
+        }
+        const float base = currentInstrumentParams().values[param].load();
+        const float value = restoreBase
+            ? base
+            : base + offset * (info->maxValue - info->minValue) * 0.5f;
+        mInstrument->setParameter(param, clampParam(*info, value));
+        return true;
+    }
+    if (type == 1) {
+        if (slot < 0 || slot >= mMidiChainCount || !mMidiChain[slot]
+                || !mMidiChain[slot]->effect) {
+            return false;
+        }
+        const auto* info = midiChainInfo(slot, param);
+        if (!info) {
+            return false;
+        }
+        const float base = mMidiChain[slot]->params.values[param].load();
+        const float value = restoreBase
+            ? base
+            : base + offset * (info->maxValue - info->minValue) * 0.5f;
+        mMidiChain[slot]->effect->setParameter(
+            param, clampParam(*info, value));
+        return true;
+    }
+    if (type == 2) {
+        if (slot < 0 || slot >= mAudioChainCount || !mAudioChain[slot]
+                || !mAudioChain[slot]->effect) {
+            return false;
+        }
+        const auto* info = audioChainInfo(slot, param);
+        if (!info) {
+            return false;
+        }
+        const float base = mAudioChain[slot]->params.values[param].load();
+        const float value = restoreBase
+            ? base
+            : base + offset * (info->maxValue - info->minValue) * 0.5f;
+        mAudioChain[slot]->effect->setParameter(
+            param, clampParam(*info, value));
+        return true;
+    }
+    return false;
+}
+
+void YawnEngine::applyModulation() {
+    for (int source = 0; source < kModSourceCount; ++source) {
+        const float target = mModSources[source].load(
+            std::memory_order_relaxed);
+        mModSmoothed[source] +=
+            mModSmoothCoeff * (target - mModSmoothed[source]);
+    }
+
+    std::array<ModTarget, kMaxModSlots> current{};
+    std::array<float, kMaxModSlots> offsets{};
+    int count = 0;
+    for (const auto& modSlot : mModSlots) {
+        if (!modSlot.enabled || modSlot.targetType < 0) {
+            continue;
+        }
+        const float offset = modSlot.amount *
+            mModSmoothed[std::clamp(modSlot.source, 0, kModSourceCount - 1)];
+        int found = -1;
+        for (int i = 0; i < count; ++i) {
+            if (current[i].type == modSlot.targetType
+                    && current[i].slot == modSlot.targetSlot
+                    && current[i].param == modSlot.targetParam) {
+                found = i;
+                break;
+            }
+        }
+        if (found < 0 && count < kMaxModSlots) {
+            found = count++;
+            current[found] = {modSlot.targetType, modSlot.targetSlot,
+                              modSlot.targetParam};
+            offsets[found] = 0.0f;
+        }
+        if (found >= 0) {
+            offsets[found] += offset;
+        }
+    }
+
+    for (int i = 0; i < count; ++i) {
+        applyModTarget(current[i].type, current[i].slot, current[i].param,
+                       offsets[i], false);
+    }
+    for (int i = 0; i < mLastModTargetCount; ++i) {
+        const ModTarget& old = mLastModTargets[i];
+        bool stillActive = false;
+        for (int j = 0; j < count; ++j) {
+            if (current[j].type == old.type && current[j].slot == old.slot
+                    && current[j].param == old.param) {
+                stillActive = true;
+                break;
+            }
+        }
+        if (!stillActive) {
+            applyModTarget(old.type, old.slot, old.param, 0.0f, true);
+        }
+    }
+    mLastModTargets = current;
+    mLastModTargetCount = count;
+}
+
+void YawnEngine::copyWaveform(float* out, int length) const {
+    if (out == nullptr || length <= 0) {
+        return;
+    }
+    const int count = std::min(length, kWaveformSize);
+    const int start =
+        (mWaveformIndex - count + kWaveformSize) % kWaveformSize;
+    for (int i = 0; i < count; ++i) {
+        out[i] = mWaveform[(start + i) % kWaveformSize];
     }
 }
 
@@ -1643,6 +1989,7 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
 
     float* output = static_cast<float*>(audioData);
     processEvents(numFrames);
+    applyModulation();
 
     int remaining = numFrames;
     int offset = 0;
@@ -1668,6 +2015,15 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         float* left = mMixBuffer.data();
         float* right = mMixBuffer.data() + 1;
 
+        updateActiveNotes(mMidiBuffer);
+        const int active = std::clamp(activeNoteCount(), 0, 16);
+        const int effectiveVoices = std::max(1, active);
+        const float polyTarget = mPolyphonyLeveling.load()
+            ? 1.0f / std::sqrt(static_cast<float>(effectiveVoices))
+            : 1.0f;
+        const float polySmooth = 1.0f - std::exp(
+            -1.0f / (0.02f * static_cast<float>(mSampleRate)));
+
         if (mInstrument) {
             mInstrument->process(mMixBuffer.data(), frames, 2, mMidiBuffer);
         }
@@ -1684,8 +2040,11 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         renderLoop(left, right, frames);
 
         for (int i = 0; i < frames; ++i) {
-            const float l = std::tanh(left[i * 2] * mMasterVolume);
-            const float r = std::tanh(right[i * 2] * mMasterVolume);
+            mPolyphonyGain += polySmooth * (polyTarget - mPolyphonyGain);
+            const float l = std::tanh(
+                left[i * 2] * mMasterVolume * mPolyphonyGain);
+            const float r = std::tanh(
+                right[i * 2] * mMasterVolume * mPolyphonyGain);
             if (mChannelCount > 1) {
                 output[(offset + i) * mChannelCount] = l;
                 output[(offset + i) * mChannelCount + 1] = r;
@@ -1693,7 +2052,7 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
                 output[offset + i] = (l + r) * 0.5f;
             }
             mWaveform[mWaveformIndex] = l;
-            mWaveformIndex = (mWaveformIndex + 1) % 256;
+            mWaveformIndex = (mWaveformIndex + 1) % kWaveformSize;
         }
         recordSamples(left, right, frames);
 
@@ -1703,6 +2062,10 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         remaining -= frames;
         offset += frames;
         firstChunk = false;
+    }
+
+    if (mSafetyLimiter.load()) {
+        mSafetyLimiterEffect.process(output, numFrames, mChannelCount);
     }
 
     const double elapsed = std::chrono::duration<double>(

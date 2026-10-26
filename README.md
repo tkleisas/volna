@@ -2,7 +2,7 @@
 
 **волна** (pronounced *volna*) means “wave” in Russian. Volna is a landscape,
 multitouch wavetable instrument for Android. It combines a large expressive touch
-surface with two selectable synthesis engines, editable MIDI and audio effect
+surface with three selectable synthesis engines, editable MIDI and audio effect
 chains, microtonal tuning, MPE output, and a Wi-Fi RTP-MIDI bridge to
 [YAWN](https://github.com/tkleisas/yawn).
 
@@ -11,7 +11,9 @@ Prebuilt APKs are published on the
 
 ![Volna wavetables](./images/volnawavetable.gif?raw=true)
 
-![Volna in action](./images/volna0.8c.png?raw=true)
+![Volna performance surface with waveform and spectrum](./images/volna0.9.3-scope.png?raw=true)
+
+![Volna effect-chain settings](./images/volna0.9.3-fx.png?raw=true)
 
 Demo video: <https://youtu.be/Cf_wpDYhudk>
 
@@ -24,6 +26,7 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
 - [Effect chains](#effect-chains)
 - [Microtonal tuning and MPE](#microtonal-tuning-and-mpe)
 - [Touch pressure](#touch-pressure)
+- [Motion modulation matrix](#motion-modulation-matrix)
 - [Wavetables and VWaveEditor import](#wavetables-and-vwaveeditor-import)
 - [YAWN integration over RTP-MIDI](#yawn-integration-over-rtp-midi)
 - [MIDI controller and device support](#midi-controller-and-device-support)
@@ -43,15 +46,25 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
 ## Performance surface
 
 - Landscape, fullscreen, multitouch surface with up to 10 simultaneous touches.
+- Full-bleed performance area: the grid and waveform extend behind the dim
+  top strip, so the playing surface reaches the screen edges. The strip carries
+  the wordmark, note/scale readout, engine, display mode, and DSP meter.
 - Horizontal position selects pitch; vertical position selects octave/wavetable
   colour and brightness.
-- The note grid is drawn on screen. **Grid size** sets how many pixels of
+- The note grid is drawn edge-to-edge, with cell boundaries and brighter
+  low/mid/high register separators. **Grid size** sets how many pixels of
   horizontal travel are needed to reach the next note.
+- In TET12, note names are drawn inside each register zone and again along the
+  bottom edge of the grid. Labels are hidden when the note cells become too
+  narrow, and they follow the current root, scale, tuning, and register offsets.
 - Finger pressure drives note velocity when the touchscreen exposes pressure.
-- Live oscilloscope, active-note markers, note names, cent offsets, and spread
-  values are drawn on the surface.
-- The **SET** button opens the settings panel; **REC** and **PLAY** control the
-  built-in loop recorder.
+- The performance display has a stable-trigger waveform with a gradient fill,
+  a 64-band log-spaced spectrum overlay, peak caps, and note-name chips for
+  active touches. The **WAVE / FFT / BOTH** control is remembered between
+  launches.
+- The **SET** button opens the tabbed settings panel; **REC** and **PLAY**
+  control the built-in loop recorder. A compact pie in the rail shows record
+  buffer fill or playback position, and **CLEAR** resets the loop.
 - The app keeps the screen awake and is locked to landscape.
 
 ## Sound engines
@@ -175,6 +188,49 @@ Gesture model:
 - Per-finger pressure is tracked independently.
 - The velocity value is displayed next to the active note marker.
 
+## Motion modulation matrix
+
+The **MOD** tab contains a small sensor-to-parameter matrix. Rows are disabled
+by default, and the sensors are only registered while at least one enabled row
+exists, so idle battery use stays low.
+
+Sources:
+
+- Accelerometer X/Y/Z
+- Gyroscope X/Y/Z
+- Magnetometer X/Y/Z
+- Magnetometer magnitude
+
+Sensors are normalized and low-pass filtered. The first event after enabling a
+sensor (or pressing **Calibrate sensors**) becomes the zero baseline, making the
+controls relative to how the device is held or to the local magnetic field. The
+magnetometer makes it possible to play with a magnet.
+
+A live indicator appears both in the top strip and beside the MOD status. Its
+three dots light for the active accelerometer, gyro, and magnetometer groups,
+and the center needle shows the current normalized sensor value.
+
+Targets:
+
+- **Synth**: filter cutoff, filter resonance, wavetable position, LFO amount,
+  unison detune, sub level, oscillator detune, and noise level where applicable
+  to the selected YAWN instrument.
+- **Audio FX**: continuous parameters of every effect currently in the audio
+  chain. Boolean and stepped parameters are excluded.
+
+Matrix rows:
+
+- Up to six rows, each with **ON/OFF**, source, target, and a bipolar amount
+  from -100% to +100%.
+- Amount is applied as a fraction of the target parameter range; multiple rows
+  can target the same parameter and their offsets are summed and clamped.
+- Modulation is additive in the native audio thread, so the saved knob/slider
+  value stays intact and is restored when a row is disabled.
+- Rows and their settings are persisted.
+- The engine-switch path resets the outgoing synth/arp and re-sends held touches
+  to the newly selected engine, so an active YAWN arpeggiator cannot leak into
+  Volna Classic.
+
 ## Wavetables and VWaveEditor import
 
 - Imports VWaveEditor `.vwt` **v1 and v2** files through Android’s document
@@ -222,28 +278,36 @@ Protocol details:
 
 ## Settings, persistence, and lifecycle
 
-Settings groups are collapsible for navigation:
+Settings open in a side panel beside the performance surface, so you can keep
+playing while editing. The panel has six tabs, each with collapsible cards:
 
-- **Performance**: grid size, DSP load, peak reset.
-- **Sound engine**: engine selector, instrument parameters, tempo/master,
-  MIDI effect chain, audio effect chain.
-- **Appearance**: green/red terminal theme.
-- **Tuning**: root, scale, A4, octave factor, TET, legato, register offsets.
-- **Classic oscillator**: legacy ADSR, spread, wavetable and wave-control
-  sliders.
-- **Legacy delay**: original delay level/time/feedback controls.
-- **Wavetable bank**: import and factory restore.
-- **MIDI devices**: Android MIDI input/output selectors.
-- **RTP-MIDI**: host, port, enable toggle, status.
+- **Play**: grid size, DSP peak reset, legato, output limiter, polyphony
+  leveling, red-phosphor display option, and About/credits.
+- **Sound**: engine selector, YAWN instrument parameters, tempo/master, classic
+  oscillator, and wavetable bank.
+- **FX**: editable MIDI and audio effect chains plus the legacy delay.
+- **Tune**: TET, root, scale, A4, octave factor, and register offsets.
+- **I/O**: Android MIDI devices and RTP-MIDI host/port/status.
+- **MOD**: the sensor modulation matrix.
+
+The selected tab is remembered. Controls use consistent label/value rows,
+accent-tinted sliders, compact toggles, and larger touch targets.
+
+![Volna output safety controls](./images/volna0.9.3-safety.png?raw=true)
+
+![Volna modulation matrix](./images/volna0.9.3-mod.png?raw=true)
 
 Persisted state:
 
 - Engine selection, YAWN instrument, tempo, master volume.
 - Both YAWN instrument parameter banks.
 - Every MIDI/audio effect chain: composition, order, bypass, and parameters.
-- Tuning, scale, root, register offsets, grid size, legato, theme.
+- Tuning, scale, root, register offsets, grid size, legato, red phosphor,
+  scope display mode, selected settings tab, output limiter, and polyphony
+  leveling.
 - Imported wavetable bytes and display name.
 - RTP-MIDI host/port/enabled state.
+- Modulation matrix rows, sources, targets, amounts, and enable states.
 - Legacy oscillator, envelope, wave-control, and delay settings.
 
 State is saved after edits via a short debounce and on pause/destroy. It is
@@ -259,14 +323,35 @@ Audio lifecycle:
 ## Recording and playback
 
 - **REC** records the final mixed output into a 60-second loop buffer.
-- **PLAY** loops the recording; start/end trims are applied.
+- **PLAY** loops the recording.
 - Recording and playback are available in both Classic and YAWN engines.
+- A **20 ms linear crossfade** joins the end of the loop to its beginning, so the
+  seam is continuous and the head is not repeated after the crossfade.
+- The rail pie shows recording buffer fill (red) or playback position (accent).
+- **CLEAR** stops recording/playback and empties the loop buffer.
+- Recording stops automatically at 60 seconds; the pie shows a full buffer and
+  the REC button is released.
+- Pressing PLAY without a recorded loop is rejected instead of leaving a stuck
+  PLAY state.
 - Loop playback is added after the synth/effect chain but before master volume.
 
 ## DSP meter and performance
 
-The settings panel shows real-time DSP callback load and peak load, with a reset
-button.
+The top bar shows real-time DSP callback load and peak load. The reset button
+is on the Play tab.
+
+Two independent safety controls are available on the Play tab and are enabled
+by default:
+
+- **Output limiter**: a dedicated final master limiter with a -1 dBFS ceiling
+  and 3 ms lookahead. It is independent of the editable effect chain, so it
+  still protects the output if the chain is changed or bypassed.
+- **Polyphony leveling**: reduces gain as more notes are held, using a smoothed
+  `1 / sqrt(active voices)` curve. Single notes keep their full level while
+  dense chords sum more evenly.
+
+Both settings are persisted. The limiter adds a few milliseconds of lookahead
+latency; turning it off restores the unprocessed output path.
 
 Measured on the test device:
 
@@ -324,6 +409,12 @@ app/src/main/java/org/bokontep/wavesynth/
   MicrotonalVoice.java       hybrid anchor/re-anchor gesture state
   TouchExpression.java       pressure/velocity curve
   RtpMidiClient.java         RTP-MIDI sender
+  Scope.java                 waveform/spectrum display
+  WaveDisplay.java           oscillator preview
+  SpectrumAnalyzer.java      1024-point FFT and log-spaced bars
+  LoopMeterView.java         loop fill/playback pie
+  SensorModulation.java      sensor normalization and calibration
+  ModMatrixController.java   MOD tab matrix UI and persistence
   CollapsibleSection.java    settings section UI
 app/src/main/cpp/
   include/                   VAEngine, YawnEngine, event queue, DSP headers
@@ -359,7 +450,8 @@ build the `app` configuration.
 ## Testing and CI
 
 - JVM unit tests cover `.vwt` parsing/mapping, microtonal pitch splitting,
-  hybrid gesture transitions, pressure curves, and RTP-MIDI packet layout.
+  hybrid gesture transitions, pressure curves, RTP-MIDI packet layout, and the
+  spectrum/FFT analyzer.
 - Native YAWN tests cover per-note pitch bend, MPE translation, and RTP-MIDI
   parsing.
 - GitHub Actions builds the debug APK and runs the unit tests on every push and
@@ -375,6 +467,8 @@ build the `app` configuration.
 - Effect chains support 8 slots each; the CPU can be overloaded when all 16 are
   enabled simultaneously.
 - Hardware MIDI port selections are re-scanned at launch rather than persisted.
+- The modulation matrix has six slots; sensor values are intentionally smoothed,
+  so extremely fast gestures are softened.
 - Stereo output only.
 - No plugin hosting inside Volna.
 
@@ -390,7 +484,8 @@ chain state.
 - nlohmann/json: MIT.
 - Google Oboe: Apache 2.0.
 - VWaveEditor: `.vwt` format and wavetable tooling.
-- Original Volna project by Bokontep.
+- Original Volna project by Bokontep: <https://github.com/bokontep> ·
+  <https://www.bokontep.gr>.
 
 ---
 

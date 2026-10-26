@@ -67,6 +67,11 @@ public:
         adsr[0].Gate(0);
         adsr[1].Gate(0);
     }
+    void Reset()
+    {
+        adsr[0].Reset();
+        adsr[1].Reset();
+    }
     void AddOsc1WaveTable(int len, float *waveTableIn)
     {
         osc[0].AddWaveTable(len,waveTableIn);

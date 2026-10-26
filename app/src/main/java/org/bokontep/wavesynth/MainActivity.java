@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.media.VolumeShaper;
 import android.media.midi.MidiDevice;
 import android.media.midi.MidiDeviceInfo;
@@ -78,7 +79,6 @@ public class MainActivity extends AppCompatActivity {
     private long lastTouchEventTime = 0;
 
 
-    private String midiLog = "";
     private VolnaMidiReceiver midiReceiver;
     private Paint paint;
     private byte[] mByteBuffer = new byte[3];
@@ -119,12 +119,31 @@ public class MainActivity extends AppCompatActivity {
     private WavetableStore wavetableStore;
     private TextView customWavetableText;
     private Spinner engineSpinner;
-    private LinearLayout yawnControls;
+    private TextView engineChip;
+    private LinearLayout soundControls;
+    private LinearLayout fxControls;
     private CollapsibleSection midiFxSection;
     private CollapsibleSection audioFxSection;
     private float yawnTempo = 120.0f;
     private float yawnMasterVolume = 0.8f;
 
+    private View performanceArea;
+    private View settingsPanel;
+    private TextView performanceInfoText;
+    private TextView scopeModeWave;
+    private TextView scopeModeFft;
+    private TextView scopeModeBoth;
+    private int scopeMode = Scope.MODE_BOTH;
+    private SpectrumAnalyzer spectrumAnalyzer;
+    private float[] spectrumBars;
+    private int spectrumFrame;
+    private final List<View> settingsCards = new ArrayList<>();
+    private final List<String> settingsCardTabs = new ArrayList<>();
+    private final List<TextView> settingsTabButtons = new ArrayList<>();
+    private final List<String> settingsTabKeys = new ArrayList<>();
+    private String currentSettingsTab = "play";
+
+    private ModMatrixController modMatrix;
     private RtpMidiClient rtpMidiClient;
     private EditText rtpMidiHostEditText;
     private EditText rtpMidiPortEditText;
@@ -142,8 +161,12 @@ public class MainActivity extends AppCompatActivity {
 
     private ToggleButton redToggleButton;
     private ToggleButton legatoToggleButton;
+    private ToggleButton safetyLimiterToggle;
+    private ToggleButton polyphonyLevelingToggle;
     private Spinner scaleSpinner;
     private boolean legato = true;
+    private boolean safetyLimiter = true;
+    private boolean polyphonyLeveling = true;
     private Spinner rootNoteSpinner;
     private SeekBar tetSeekBar;
     private SeekBar tuneSeekBar;
@@ -191,9 +214,11 @@ public class MainActivity extends AppCompatActivity {
     private Button settingsButton;
     private Button recButton;
     private Button playButton;
-    private Button clearButton;
-    private Button tempoButton;
-    private View optionsScrollView;
+    private LoopMeterView loopMeter;
+    private View loopClearButton;
+    private long recordStartTime;
+    private long playStartTime;
+    private ScrollView optionsScrollView;
     private View menuView;
     private int rootNote = 36;
     private int xNoteScale = 160;
@@ -267,6 +292,7 @@ public class MainActivity extends AppCompatActivity {
         yawnTempo = prefs.readInt("yawnTempo", 1200) / 10.0f;
         yawnMasterVolume = prefs.readInt("yawnMasterVolume", 800) / 1000.0f;
         engine.initAudio();
+        engine.resetDspPeak();
         if (engine.getEngineMode() != SynthEngine.ENGINE_LEGACY) {
             engine.setYawnTempo(yawnTempo);
             engine.setYawnMasterVolume(yawnMasterVolume);
@@ -277,6 +303,8 @@ public class MainActivity extends AppCompatActivity {
         octaveFactor = (prefs.readInt("octaveFactor",2000)/1000.0f);
         red = prefs.readInt("red", 0) == 0 ? false : true;
         legato = prefs.readInt("legato", 0)==0?false:true;
+        safetyLimiter = prefs.readInt("safetyLimiter", 1) != 0;
+        polyphonyLeveling = prefs.readInt("polyphonyLeveling", 1) != 0;
 
         rootNote = prefs.readInt("rootNote", 35);
         xNoteScale = prefs.readInt("xNoteScale", 160);
@@ -322,8 +350,13 @@ public class MainActivity extends AppCompatActivity {
                 "YAWN Wavetable",
                 "YAWN Subtractive"
         };
-        engineSpinner.setAdapter(new ArrayAdapter<String>(this,
-                android.R.layout.simple_spinner_dropdown_item, engineNames));
+        engineSpinner.setAdapter(spinnerAdapter(engineNames));
+        engineChip = findViewById(R.id.engineChip);
+        engineChip.setText(engineNames[engine.getEngineMode()].toUpperCase(Locale.US));
+        engineChip.setOnClickListener(v -> {
+            showSettings();
+            selectSettingsTab("sound");
+        });
         engineSpinner.setSelection(engine.getEngineMode());
         engineSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -334,14 +367,27 @@ public class MainActivity extends AppCompatActivity {
                 }
                 saveSynthStateNow();
                 engine.switchEngine(position);
+                engine.resetDspPeak();
+                applySafetySettings();
                 prefs.writeInt("engineMode", position);
                 if (position != SynthEngine.ENGINE_LEGACY) {
                     restoreSynthState();
+                }
+                if (engineChip != null) {
+                    engineChip.setText(engineNames[position].toUpperCase(Locale.US));
                 }
                 rebuildYawnControls();
                 updateWavetableViews();
                 if (wavetableStore.hasStoredWavetable()) {
                     restoreSavedWavetable();
+                }
+                record = false;
+                play = false;
+                recButton.setSelected(false);
+                playButton.setSelected(false);
+                retriggerActiveTouches();
+                if (modMatrix != null) {
+                    modMatrix.onEngineChanged();
                 }
             }
 
@@ -349,9 +395,11 @@ public class MainActivity extends AppCompatActivity {
             public void onNothingSelected(AdapterView<?> parent) {
             }
         });
-        yawnControls = (LinearLayout) findViewById(R.id.yawnControls);
+        soundControls = findViewById(R.id.soundControls);
+        fxControls = findViewById(R.id.fxControls);
         rebuildYawnControls();
         installCollapsibleXmlSections();
+        setupSettingsTabs();
         redToggleButton = (ToggleButton) findViewById(R.id.redToggleButton);
         redToggleButton.setOnCheckedChangeListener(
                 new CompoundButton.OnCheckedChangeListener() {
@@ -381,13 +429,43 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
+        safetyLimiterToggle = findViewById(R.id.safetyLimiterToggle);
+        safetyLimiterToggle.setChecked(safetyLimiter);
+        safetyLimiterToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            safetyLimiter = isChecked;
+            prefs.writeInt("safetyLimiter", isChecked ? 1 : 0);
+            applySafetySettings();
+        });
+        polyphonyLevelingToggle = findViewById(R.id.polyphonyLevelingToggle);
+        polyphonyLevelingToggle.setChecked(polyphonyLeveling);
+        polyphonyLevelingToggle.setOnCheckedChangeListener(
+                (buttonView, isChecked) -> {
+                    polyphonyLeveling = isChecked;
+                    prefs.writeInt("polyphonyLeveling", isChecked ? 1 : 0);
+                    applySafetySettings();
+                });
+        applySafetySettings();
 
+        performanceArea = findViewById(R.id.performanceArea);
+        performanceInfoText = findViewById(R.id.performanceInfoText);
         scope = findViewById(R.id.mscope);
         scope.setXNoteScale(xNoteScale);
         scope.setRed(red);
+        setupPerformanceTouch();
+        setupScopeModeControls();
+        scope.setNoteLabelProvider((cell, zone) -> {
+            if (tet != 12 || pitchMapper == null) {
+                return null;
+            }
+            int offset = zone == 0 ? lowOffset
+                    : (zone == 1 ? midOffset : highOffset);
+            int note = MicrotonalPitchMapper.clampNote(
+                    (int) Math.round(pitchMapper.pitchForCell(cell, offset)));
+            return noteName(note);
+        });
         updateScopeText();
         rootNoteSpinner = (Spinner) findViewById(R.id.rootNoteSpinner);
-        final ArrayAdapter<String> rootNoteAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, rootNotes);
+        final ArrayAdapter<String> rootNoteAdapter = spinnerAdapter(rootNotes);
 
         rootNoteSpinner.setAdapter(rootNoteAdapter);
         rootNoteSpinner.setSelection(rootNote);
@@ -407,7 +485,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-        final ArrayAdapter<String> scaleAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, scaleNames);
+        final ArrayAdapter<String> scaleAdapter = spinnerAdapter(scaleNames);
         scaleSpinner = (Spinner) findViewById(R.id.scaleSpinner);
         scaleSpinner.setAdapter(scaleAdapter);
 
@@ -432,11 +510,11 @@ public class MainActivity extends AppCompatActivity {
         this.tetSeekBar = (SeekBar) findViewById(R.id.tetSeekBar);
         this.tetSeekBar.setProgress(tet);
         this.tetTextView = (TextView) findViewById(R.id.tetText);
-        this.tetTextView.setText("Tuning Equal Temperament (TET):" + tet);
+        this.tetTextView.setText("TET: " + tet);
         this.tuneSeekBar = (SeekBar) findViewById(R.id.tuneSeekBar);
         this.tuneSeekBar.setProgress((int) (tune * 10));
         this.octaveFactorTextView = (TextView)findViewById(R.id.octaveFactorText);
-        this.octaveFactorTextView.setText("Octave factor (default is 2):"+octaveFactor);
+        this.octaveFactorTextView.setText(String.format(Locale.US, "Octave factor: %.2f", octaveFactor));
         this.octaveFactorSeekBar = (SeekBar)findViewById(R.id.octaveFactorSeekBar);
         this.octaveFactorSeekBar.setProgress((int) (octaveFactor * 1000));
 
@@ -469,7 +547,8 @@ public class MainActivity extends AppCompatActivity {
                 engine.resetDspPeak();
             }
             if (dspLoadText != null) {
-                dspLoadText.setText("DSP: --");
+                dspLoadText.setText(String.format(Locale.US,
+                        "DSP %5.1f%%  pk %5.1f%%", 0.0f, 0.0f));
             }
         });
         this.osc1WaveSeekBar = (SeekBar) findViewById(R.id.osc1WaveSeekBar);
@@ -487,34 +566,34 @@ public class MainActivity extends AppCompatActivity {
         this.delayFeedbackSeekBar = (SeekBar) findViewById(R.id.delayFeedbackSeekBar);
         this.delayFeedbackSeekBar.setProgress(delayFeedback);
         this.tuneTextView = (TextView) findViewById(R.id.tuneText);
-        this.tuneTextView.setText("A frequency (Hz):" + tune);
+        this.tuneTextView.setText(String.format(Locale.US, "A4 frequency: %.1f Hz", tune));
         this.osc1AttackTextView = (TextView) findViewById(R.id.osc1AttackText);
-        this.osc1AttackTextView.setText("osc1Attack:" + engine.getOsc1Attack());
+        this.osc1AttackTextView.setText("Osc 1 attack: " + engine.getOsc1Attack());
         this.osc1DecayTextView = (TextView) findViewById(R.id.osc1DecayText);
-        this.osc1DecayTextView.setText("osc1Decay:" + engine.getOsc1Decay());
+        this.osc1DecayTextView.setText("Osc 1 decay: " + engine.getOsc1Decay());
         this.osc1SustainTextView = (TextView) findViewById(R.id.osc1SustainText);
-        this.osc1SustainTextView.setText("osc1Sustain:" + engine.getOsc1Sustain());
+        this.osc1SustainTextView.setText("Osc 1 sustain: " + engine.getOsc1Sustain());
         this.osc1ReleaseTextView = (TextView) findViewById(R.id.osc1ReleaseText);
-        this.osc1ReleaseTextView.setText("osc1Release:" + engine.getOsc1Release());
+        this.osc1ReleaseTextView.setText("Osc 1 release: " + engine.getOsc1Release());
         this.osc2AttackTextView = (TextView) findViewById(R.id.osc2AttackText);
-        this.osc2AttackTextView.setText("osc2Attack:" + engine.getOsc2Attack());
+        this.osc2AttackTextView.setText("Osc 2 attack: " + engine.getOsc2Attack());
         this.osc2DecayTextView = (TextView) findViewById(R.id.osc2DecayText);
-        this.osc2DecayTextView.setText("osc2Decay:" + engine.getOsc2Decay());
+        this.osc2DecayTextView.setText("Osc 2 decay: " + engine.getOsc2Decay());
         this.osc2SustainTextView = (TextView) findViewById(R.id.osc2SustainText);
-        this.osc2SustainTextView.setText("osc2Sustain:" + engine.getOsc2Sustain());
+        this.osc2SustainTextView.setText("Osc 2 sustain: " + engine.getOsc2Sustain());
         this.osc2ReleaseTextView = (TextView) findViewById(R.id.osc2ReleaseText);
-        this.osc2ReleaseTextView.setText("osc2Release:" + engine.getOsc2Release());
+        this.osc2ReleaseTextView.setText("Osc 2 release: " + engine.getOsc2Release());
 
         this.oscSpreadTextView = (TextView) findViewById(R.id.oscSpreadText);
-        this.oscSpreadTextView.setText("oscSpread:" + maxSpread);
+        this.oscSpreadTextView.setText("Unison spread: " + maxSpread);
         this.osc1WaveTextView = (TextView) findViewById(R.id.osc1WaveText);
-        this.osc1WaveTextView.setText("osc1Wave:" + osc1Wave);
+        this.osc1WaveTextView.setText("Osc 1 wavetable: " + osc1Wave);
         this.osc2WaveTextView = (TextView) findViewById(R.id.osc2WaveText);
-        this.osc2WaveTextView.setText("osc2Wave:" + osc2Wave);
+        this.osc2WaveTextView.setText("Osc 2 wavetable: " + osc2Wave);
         this.osc1WaveControlTextView = (TextView) findViewById(R.id.osc1WaveControlText);
-        this.osc1WaveControlTextView.setText("osc1WaveControl:" + osc1WaveControl);
+        this.osc1WaveControlTextView.setText("Osc 1 wave control: " + osc1WaveControl);
         this.osc2WaveControlTextView = (TextView) findViewById(R.id.osc2WaveControlText);
-        this.osc2WaveControlTextView.setText("osc2WaveControl:" + osc2WaveControl);
+        this.osc2WaveControlTextView.setText("Osc 2 wave control: " + osc2WaveControl);
         this.osc1WaveDisplay = (WaveDisplay) findViewById(R.id.osc1WaveDisplay);
         this.osc1WaveDisplay.setData(engine.getWavetable(osc1Wave));
         this.osc1WaveDisplay.setRed(red);
@@ -628,87 +707,87 @@ public class MainActivity extends AppCompatActivity {
                 int id = seekBar.getId();
                 if (id == R.id.tuneSeekBar) {
                     tune = ((float) progress) / 10.0f;
-                    tuneTextView.setText("A frequency (Hz):" + tune);
+                    tuneTextView.setText(String.format(Locale.US, "A4 frequency: %.1f Hz", tune));
                     engine.setTune(tune);
                     prefs.writeInt("tune", (int) (tune * 10));
                     updatePitchMapper();
                 } else if (id == R.id.tetSeekBar) {
                     tet = progress;
                     engine.setTet(tet);
-                    tetTextView.setText("Tuning Equal Temperament:" + tet);
+                    tetTextView.setText("TET: " + tet);
                     prefs.writeInt("tet", tet);
                     updatePitchMapper();
                 } else if (id == R.id.octaveFactorSeekBar) {
                     octaveFactor = ((float)progress) / 1000.0f;
-                    octaveFactorTextView.setText("Octave factor (default is 2):"+octaveFactor);
+                    octaveFactorTextView.setText(String.format(Locale.US, "Octave factor: %.2f", octaveFactor));
                     engine.setOctaveFactor(octaveFactor);
                     prefs.writeInt("octaveFactor",(int)(octaveFactor*1000));
                     updatePitchMapper();
                 } else if (id == R.id.osc1AttackSeekBar) {
                     engine.setOsc1Attack(progress);
-                    osc1AttackTextView.setText("osc1Attack:" + engine.getOsc1Attack());
+                    osc1AttackTextView.setText("Osc 1 attack: " + engine.getOsc1Attack());
                     prefs.writeInt("osc1Attack", engine.getOsc1Attack());
                     engine.sendMidiCC(0, 18, engine.getOsc1Attack());
                 } else if (id == R.id.osc1DecaySeekBar) {
                     engine.setOsc1Decay(progress);
-                    osc1DecayTextView.setText("osc1Decay:" + engine.getOsc1Decay());
+                    osc1DecayTextView.setText("Osc 1 decay: " + engine.getOsc1Decay());
                     prefs.writeInt("osc1Decay", engine.getOsc1Decay());
                     engine.sendMidiCC(0, 19, engine.getOsc1Decay());
                 } else if (id == R.id.osc1SustainSeekBar) {
                     engine.setOsc1Sustain(progress);
-                    osc1SustainTextView.setText("osc1Sustain:" + engine.getOsc1Sustain());
+                    osc1SustainTextView.setText("Osc 1 sustain: " + engine.getOsc1Sustain());
                     prefs.writeInt("osc1Sustain", engine.getOsc1Sustain());
                     engine.sendMidiCC(0, 20, engine.getOsc1Sustain());
                 } else if (id == R.id.osc1ReleaseSeekBar) {
                     engine.setOsc1Release(progress);
-                    osc1ReleaseTextView.setText("osc1Release:" + engine.getOsc1Release());
+                    osc1ReleaseTextView.setText("Osc 1 release: " + engine.getOsc1Release());
                     prefs.writeInt("osc1Release", engine.getOsc1Release());
                     engine.sendMidiCC(0, 21, engine.getOsc1Release());
                 } else if (id == R.id.osc2AttackSeekBar) {
                     engine.setOsc2Attack(progress);
-                    osc2AttackTextView.setText("osc2Attack:" + engine.getOsc2Attack());
+                    osc2AttackTextView.setText("Osc 2 attack: " + engine.getOsc2Attack());
                     prefs.writeInt("osc2Attack", engine.getOsc2Attack());
                     engine.sendMidiCC(0, 22, engine.getOsc2Attack());
                 } else if (id == R.id.osc2DecaySeekBar) {
                     engine.setOsc2Decay(progress);
-                    osc2DecayTextView.setText("osc2Decay:" + engine.getOsc2Decay());
+                    osc2DecayTextView.setText("Osc 2 decay: " + engine.getOsc2Decay());
                     prefs.writeInt("osc2Decay", engine.getOsc2Decay());
                     engine.sendMidiCC(0, 23, engine.getOsc2Decay());
                 } else if (id == R.id.osc2SustainSeekBar) {
                     engine.setOsc2Sustain(progress);
-                    osc2SustainTextView.setText("osc2Sustain:" + engine.getOsc2Sustain());
+                    osc2SustainTextView.setText("Osc 2 sustain: " + engine.getOsc2Sustain());
                     prefs.writeInt("osc2Sustain", engine.getOsc2Sustain());
                     engine.sendMidiCC(0, 24, engine.getOsc2Sustain());
                 } else if (id == R.id.osc2ReleaseSeekBar) {
                     engine.setOsc2Release(progress);
-                    osc2ReleaseTextView.setText("osc2Release:" + engine.getOsc2Release());
+                    osc2ReleaseTextView.setText("Osc 2 release: " + engine.getOsc2Release());
                     prefs.writeInt("osc2Release", engine.getOsc2Release());
                     engine.sendMidiCC(0, 25, engine.getOsc2Release());
                 } else if (id == R.id.maxSpreadSeekBar) {
                     maxSpread = progress;
-                    oscSpreadTextView.setText("oscSpread:" + maxSpread);
+                    oscSpreadTextView.setText("Unison spread: " + maxSpread);
                     prefs.writeInt("maxSpread", maxSpread);
                 } else if (id == R.id.osc1WaveSeekBar) {
                     osc1Wave = progress;
                     osc1WaveDisplay.setData(engine.getWavetable(osc1Wave));
                     engine.sendMidiCC(0,16,osc1Wave);
-                    osc1WaveTextView.setText("osc1Wave:" + osc1Wave);
+                    osc1WaveTextView.setText("Osc 1 wavetable: " + osc1Wave);
                     osc1WaveDisplay.invalidate();
                     prefs.writeInt("osc1Wave", osc1Wave);
                 } else if (id == R.id.osc2WaveSeekBar) {
                     osc2Wave = progress;
                     osc2WaveDisplay.setData(engine.getWavetable(osc2Wave));
                     engine.sendMidiCC(0,17,osc2Wave);
-                    osc2WaveTextView.setText("osc2Wave:" + osc2Wave);
+                    osc2WaveTextView.setText("Osc 2 wavetable: " + osc2Wave);
                     osc2WaveDisplay.invalidate();
                     prefs.writeInt("osc2Wave", osc2Wave);
                 } else if (id == R.id.osc1WaveControlSeekBar) {
                     osc1WaveControl = progress;
-                    osc1WaveControlTextView.setText("osc1WaveControl:" + osc1WaveControl);
+                    osc1WaveControlTextView.setText("Osc 1 wave control: " + osc1WaveControl);
                     prefs.writeInt("osc1WaveControl", osc1WaveControl);
                 } else if (id == R.id.osc2WaveControlSeekBar) {
                     osc2WaveControl = progress;
-                    osc2WaveControlTextView.setText("osc2WaveControl:" + osc2WaveControl);
+                    osc2WaveControlTextView.setText("Osc 2 wave control: " + osc2WaveControl);
                     prefs.writeInt("osc2WaveControl", osc2WaveControl);
                 } else if (id == R.id.delayLevelSeekBar) {
                     delayLevel = progress;
@@ -765,76 +844,62 @@ public class MainActivity extends AppCompatActivity {
         this.delayFeedbackSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
         this.settingsButton = (Button) findViewById(R.id.toggleSettingsButton);
         this.recButton = (Button)findViewById(R.id.recButton);
-        this.recButton.setBackgroundColor(Color.GRAY);
         this.playButton = (Button)findViewById(R.id.playButton);
-        this.clearButton = (Button)findViewById(R.id.clearButton);
-        this.tempoButton = (Button)findViewById(R.id.tempoButton);
+        this.loopMeter = findViewById(R.id.loopMeter);
+        this.loopClearButton = findViewById(R.id.loopClearButton);
+        this.recButton.setSelected(record);
+        this.playButton.setSelected(play);
         this.recButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(!record)
-                {
+                if (!record) {
                     record = true;
-                    engine.setRecord(record);
-                    recButton.setBackgroundColor(Color.RED);
-                }
-                else
-                {
+                    recordStartTime = System.currentTimeMillis();
+                    play = false;
+                    playButton.setSelected(false);
+                    engine.setRecord(true);
+                    recButton.setSelected(true);
+                } else {
                     record = false;
-                    engine.setRecord(record);
-                    recButton.setBackgroundColor(Color.GRAY);
+                    engine.setRecord(false);
+                    recButton.setSelected(false);
                 }
-                recButton.invalidate();
             }
         });
         this.playButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(!play)
-                {
+                if (!play) {
+                    if (!engine.hasLoop()) {
+                        Toast.makeText(MainActivity.this,
+                                "Record a loop first", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (record) {
+                        record = false;
+                        recButton.setSelected(false);
+                        engine.setRecord(false);
+                    }
                     play = true;
-                    engine.setPlay(play);
-                    playButton.setBackgroundColor(Color.GREEN);
-
-                }
-                else
-                {
+                    playStartTime = System.currentTimeMillis();
+                    engine.setPlay(true);
+                    playButton.setSelected(true);
+                } else {
                     play = false;
-                    engine.setPlay(play);
-                    playButton.setBackgroundColor(Color.GRAY);
+                    engine.setPlay(false);
+                    playButton.setSelected(false);
                 }
             }
         });
-        //this.recButton.setVisibility(View.INVISIBLE);
-        //this.playButton.setVisibility(View.INVISIBLE);
-        this.clearButton.setVisibility(View.INVISIBLE);
-        this.tempoButton.setVisibility(View.INVISIBLE);
+        this.loopClearButton.setOnClickListener(v -> clearLoop());
         this.optionsScrollView = findViewById(R.id.optionsScrollView);
         this.menuView = findViewById(R.id.menu);
-        this.optionsScrollView.setVisibility(View.GONE);
+        this.settingsPanel = findViewById(R.id.settingsPanel);
+        this.settingsPanel.setClipToOutline(true);
+        this.settingsPanel.setVisibility(View.GONE);
         this.menuView.setVisibility(View.VISIBLE);
-        this.settingsButton.setOnClickListener(
-                new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        if (optionsScrollView.getVisibility() == View.GONE) {
-                            menuView.setVisibility(View.GONE);
-                            optionsScrollView.setVisibility(View.VISIBLE);
-                        }
-                    }
-                }
-        );
-        findViewById(R.id.closeSettingsButton).setOnClickListener(
-                new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        //applySettings();
-                        menuView.setVisibility(View.VISIBLE);
-                        optionsScrollView.setVisibility(View.GONE);
-                    }
-                }
-
-        );
+        this.settingsButton.setOnClickListener(v -> showSettings());
+        findViewById(R.id.closeSettingsButton).setOnClickListener(v -> hideSettings());
         redToggleButton.setChecked(red);
         legatoToggleButton.setChecked(legato);
         if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_MIDI)) {
@@ -847,6 +912,8 @@ public class MainActivity extends AppCompatActivity {
 
         setupRtpMidi();
 
+        modMatrix = new ModMatrixController(this, engine, prefs);
+        modMatrix.attach();
 
         screenUpdater = new Runnable() {
             @Override
@@ -863,9 +930,21 @@ public class MainActivity extends AppCompatActivity {
                     }
                     lastTouchEventTime = now;
                 }*/
-                scope.setData(engine.getWaveform());
-                scope.setMidilog(getNoteMap());
+                float[] waveform = engine.getWaveform();
+                if (waveform != null) {
+                    scope.setData(waveform);
+                    if (spectrumAnalyzer == null) {
+                        spectrumAnalyzer = new SpectrumAnalyzer();
+                        spectrumBars = new float[SpectrumAnalyzer.BAR_COUNT];
+                    }
+                    if ((spectrumFrame++ & 1) == 0) {
+                        spectrumAnalyzer.analyze(waveform,
+                                engine.getSampleRate(), spectrumBars);
+                        scope.setSpectrum(spectrumBars);
+                    }
+                }
                 updateDspMeter();
+                updateLoopUi();
                 scope.invalidate();
                 mHandler.postDelayed(screenUpdater, updateInterval);
             }
@@ -954,15 +1033,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    String getNoteMap() {
-        StringBuilder s = new StringBuilder();
-        for (int i = 0; i < touchVoices.size(); i++) {
-            s.append(touchVoices.keyAt(i)).append(':')
-                    .append(touchVoices.valueAt(i).anchorNote).append(' ');
-        }
-        return s.toString();
-    }
-
     private void scheduleSaveSynthState() {
         if (mHandler == null) {
             return;
@@ -1002,6 +1072,74 @@ public class MainActivity extends AppCompatActivity {
         prefs.writeInt("yawnMasterVolume", (int) (yawnMasterVolume * 1000));
     }
 
+    private void retriggerActiveTouches() {
+        if (engine == null) {
+            return;
+        }
+        for (int i = 0; i < touchVoices.size(); i++) {
+            TouchVoice voice = touchVoices.valueAt(i);
+            if (voice == null) {
+                continue;
+            }
+            engine.sendMidiNoteOn(0, voice.anchorNote, voice.velocity);
+            engine.sendMidiNotePitch(0, voice.anchorNote,
+                    (float) voice.expression.bendSemitones());
+            engine.sendMidiNoteSpread(0, voice.anchorNote,
+                    63 + voice.lastSpread);
+            engine.selectWaveform(0, 0, voice.anchorNote, voice.waveform1);
+            engine.selectWaveform(0, 1, voice.anchorNote, voice.waveform2);
+        }
+    }
+
+    private void updateLoopUi() {
+        if (engine == null || loopMeter == null) {
+            return;
+        }
+        final boolean nativeRecording = engine.isLoopRecording();
+        final boolean nativePlaying = engine.isLoopPlaying();
+        final boolean loopExists = engine.hasLoop();
+        final long now = System.currentTimeMillis();
+        if (record && !nativeRecording && now - recordStartTime > 500) {
+            record = false;
+            recButton.setSelected(false);
+        }
+        if (play && !nativePlaying && now - playStartTime > 500) {
+            play = false;
+            playButton.setSelected(false);
+        }
+        loopMeter.setLoopState(nativeRecording, nativePlaying, loopExists,
+                engine.getLoopRecordProgress(),
+                engine.getLoopPlayProgress());
+        if (loopClearButton != null) {
+            loopClearButton.setAlpha(loopExists || nativeRecording ? 1.0f : 0.4f);
+        }
+    }
+
+    private void clearLoop() {
+        if (engine != null) {
+            engine.clearLoop();
+        }
+        record = false;
+        play = false;
+        if (recButton != null) {
+            recButton.setSelected(false);
+        }
+        if (playButton != null) {
+            playButton.setSelected(false);
+        }
+        if (loopMeter != null) {
+            loopMeter.setLoopState(false, false, false, 0.0f, 0.0f);
+        }
+    }
+
+    private void applySafetySettings() {
+        if (engine == null) {
+            return;
+        }
+        engine.setSafetyLimiter(safetyLimiter);
+        engine.setPolyphonyLeveling(polyphonyLeveling);
+    }
+
     private void updateDspMeter() {
         if (dspLoadText == null || engine == null) {
             return;
@@ -1009,22 +1147,22 @@ public class MainActivity extends AppCompatActivity {
         if ((dspUiCounter++ % 5) != 0) {
             return;
         }
-        float load = engine.getDspLoad() * 100.0f;
-        float peak = engine.getDspPeak() * 100.0f;
+        float load = Math.min(999.9f, engine.getDspLoad() * 100.0f);
+        float peak = Math.min(999.9f, engine.getDspPeak() * 100.0f);
         dspLoadText.setText(String.format(Locale.US,
-                "DSP: %.1f%% (peak %.1f%%)", load, peak));
+                "DSP %5.1f%%  pk %5.1f%%", load, peak));
         if (load > 80.0f) {
-            dspLoadText.setTextColor(Color.RED);
+            dspLoadText.setTextColor(0xFFFF5A6E);
         } else if (load > 60.0f) {
-            dspLoadText.setTextColor(Color.rgb(255, 165, 0));
+            dspLoadText.setTextColor(0xFFFFB35C);
         } else {
-            dspLoadText.setTextColor(Color.GREEN);
+            dspLoadText.setTextColor(0xFF5CFFC0);
         }
     }
 
     private void updateGridSizeLabel() {
         if (gridSizeTextView != null) {
-            gridSizeTextView.setText("Grid size: " + xNoteScale + " px per note");
+            gridSizeTextView.setText("Grid size: " + xNoteScale + " px / note");
         }
     }
 
@@ -1033,10 +1171,22 @@ public class MainActivity extends AppCompatActivity {
         System.arraycopy(scales, currentScale * 13, scaleRow, 0, 13);
         pitchMapper = new MicrotonalPitchMapper(rootNote, scaleRow, tet, tune,
                 octaveFactor, xNoteScale);
+        if (scope != null) {
+            scope.invalidateNoteLabels();
+        }
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
+    private void setupPerformanceTouch() {
+        if (performanceArea == null) {
+            return;
+        }
+        performanceArea.setOnTouchListener((v, event) -> {
+            handlePerformanceTouch(event);
+            return true;
+        });
+    }
+
+    private boolean handlePerformanceTouch(MotionEvent event) {
         if (engine != null) {
             engine.resumeAudio();
         }
@@ -1076,8 +1226,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private float touchSurfaceHeight() {
-        float height = getWindow().getDecorView().getHeight();
-        if (height <= 0) {
+        float height = scope != null ? scope.getHeight() : 0.0f;
+        if (height <= 0.0f && performanceArea != null) {
+            height = performanceArea.getHeight();
+        }
+        if (height <= 0.0f) {
             height = getResources().getDisplayMetrics().heightPixels;
         }
         return height;
@@ -1124,7 +1277,8 @@ public class MainActivity extends AppCompatActivity {
         midiPitchBend(channel, pitchBend14(transition.bendSemitones));
         sendTouchPressure(voice);
         selectWaveformForVoice(voice);
-        scope.setMarker("" + id, x, y);
+        scope.setMarker("" + id, x, y, noteName(transition.noteOn)
+                + " " + velocity);
         vel = velocity;
     }
 
@@ -1165,7 +1319,10 @@ public class MainActivity extends AppCompatActivity {
         voice.lastSpread = (int) spreadForTouch(x);
         engine.sendMidiNoteSpread(0, voice.anchorNote,
                 63 + voice.lastSpread);
-        scope.setMarker("" + voice.pointerId, x, y);
+        int displayNote = Math.max(0, Math.min(127,
+                (int) Math.round(pitch.targetSemitones)));
+        scope.setMarker("" + voice.pointerId, x, y,
+                noteName(displayNote) + " " + velocity);
         vel = velocity;
     }
 
@@ -1278,27 +1435,28 @@ public class MainActivity extends AppCompatActivity {
         StringBuilder text = new StringBuilder();
         if (tet == 12) {
             text.append(rootNoteStr).append(' ')
-                    .append(scaleNames[currentScale]).append(" notes:");
+                    .append(scaleNames[currentScale]);
         } else {
-            text.append("tet ").append(tet).append(" notes:");
+            text.append("TET ").append(tet);
         }
         for (int i = 0; i < touchVoices.size(); i++) {
             TouchVoice voice = touchVoices.valueAt(i);
-            text.append('[').append(voice.lastSpread).append("] ");
             double target = voice.expression.currentPitch();
             int displayNote = Math.max(0, Math.min(127,
                     (int) Math.round(target)));
-            text.append(noteName(displayNote));
+            text.append("  ").append(noteName(displayNote));
             double cents = (target - displayNote) * 100.0;
             if (Math.abs(cents) >= 1.0) {
                 text.append(String.format(Locale.US, "%+.0fc", cents));
             }
-            text.append('(').append(voice.velocity).append(") ");
+            text.append('(').append(voice.velocity).append(')');
         }
         if (legato) {
-            text.append(" L");
+            text.append("  L");
         }
-        scope.setText(text.toString());
+        if (performanceInfoText != null) {
+            performanceInfoText.setText(text.toString());
+        }
     }
 
     private static String noteName(int note) {
@@ -1326,12 +1484,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void logMidi(byte[] data) {
-        if (data != null) {
-            if (data.length > 0) {
-                this.midiLog = "RX:" + data[0];
-                scope.setMidilog(this.midiLog);
-            }
-        }
     }
 
     private class PortsConnectedListener
@@ -1362,11 +1514,7 @@ public class MainActivity extends AppCompatActivity {
 
         MidiDeviceInfo synthInfo = MidiTools.findDevice(midiManager, "Bokontep",
                 "Volna");
-        if (synthInfo != null) {
-            scope.setMidilog("MIDI device found!");
-        }
         int portIndex = 0;
-        scope.setMidilog("");
         midiPortSelector = new MidiOutputPortConnectionSelector(midiManager, this,
                 spinnerID, synthInfo, portIndex);
         midiPortSelector.setConnectedListener(new MidiPortConnector.OnPortsConnectedListener() {
@@ -1717,18 +1865,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void rebuildYawnControls() {
-        if (yawnControls == null || engine == null) {
+        if (soundControls == null || fxControls == null || engine == null) {
             return;
         }
-        yawnControls.removeAllViews();
+        soundControls.removeAllViews();
+        fxControls.removeAllViews();
         final int mode = engine.getEngineMode();
         if (mode == SynthEngine.ENGINE_LEGACY) {
-            yawnControls.setVisibility(View.GONE);
+            addInfoText(soundControls,
+                    "Classic oscillator settings are below.");
+            addInfoText(fxControls,
+                    "YAWN effect chains are unavailable in Volna Classic.");
             midiFxSection = null;
             audioFxSection = null;
             return;
         }
-        yawnControls.setVisibility(View.VISIBLE);
+        soundControls.setVisibility(View.VISIBLE);
+        fxControls.setVisibility(View.VISIBLE);
 
         CollapsibleSection instrumentSection = new CollapsibleSection(this,
                 "Instrument: " + engine.getYawnInstrumentName(mode - 1), true);
@@ -1742,7 +1895,7 @@ public class MainActivity extends AppCompatActivity {
                     engine.getYawnInstrumentParamValue(i),
                     value -> engine.setYawnInstrumentParam(index, value));
         }
-        yawnControls.addView(instrumentSection.root(),
+        soundControls.addView(instrumentSection.root(),
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -1761,20 +1914,20 @@ public class MainActivity extends AppCompatActivity {
                     engine.setYawnMasterVolume(value);
                     prefs.writeInt("yawnMasterVolume", (int) (value * 1000));
                 });
-        yawnControls.addView(tempoSection.root(),
+        soundControls.addView(tempoSection.root(),
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
 
         midiFxSection = new CollapsibleSection(this, "MIDI effects", false);
-        yawnControls.addView(midiFxSection.root(),
+        fxControls.addView(midiFxSection.root(),
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
         rebuildEffectChain(true);
 
         audioFxSection = new CollapsibleSection(this, "Audio effects", false);
-        yawnControls.addView(audioFxSection.root(),
+        fxControls.addView(audioFxSection.root(),
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -1795,23 +1948,31 @@ public class MainActivity extends AppCompatActivity {
         if (count == 0) {
             TextView empty = new TextView(this);
             empty.setText("No effects in this chain yet.");
+            empty.setTextSize(12);
+            empty.setTextColor(getColor(R.color.text_secondary));
+            empty.setPadding(0, dp(6), 0, dp(6));
             content.addView(empty);
         }
         for (int slot = 0; slot < count; slot++) {
             content.addView(buildEffectSlotRow(midi, slot, count));
-            View divider = new View(this);
-            divider.setBackgroundColor(0xFF444444);
-            divider.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-            content.addView(divider);
         }
         content.addView(buildAddEffectRow(midi, count));
+        if (modMatrix != null && !midi) {
+            modMatrix.refreshTargets();
+        }
     }
 
     private LinearLayout buildEffectSlotRow(boolean midi, int slot, int count) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
-        block.setPadding(0, dp(8), 0, dp(8));
+        block.setBackgroundResource(R.drawable.bg_effect_slot);
+        block.setClipToOutline(true);
+        block.setPadding(dp(10), dp(8), dp(10), dp(10));
+        LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        blockParams.bottomMargin = dp(6);
+        block.setLayoutParams(blockParams);
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1820,11 +1981,13 @@ public class MainActivity extends AppCompatActivity {
         ToggleButton enabled = new ToggleButton(this);
         enabled.setTextOn("ON");
         enabled.setTextOff("OFF");
-        enabled.setTextSize(14);
-        enabled.setMinWidth(dp(64));
-        enabled.setMinimumWidth(dp(64));
-        enabled.setMinHeight(dp(48));
-        enabled.setMinimumHeight(dp(48));
+        enabled.setTextSize(10);
+        enabled.setBackgroundResource(R.drawable.bg_toggle);
+        enabled.setTextColor(getColorStateList(R.color.toggle_text));
+        enabled.setMinWidth(dp(54));
+        enabled.setMinimumWidth(dp(54));
+        enabled.setMinHeight(dp(34));
+        enabled.setMinimumHeight(dp(34));
         enabled.setPadding(dp(8), 0, dp(8), 0);
         boolean bypassed = midi ? engine.isYawnMidiChainBypassed(slot)
                 : engine.isYawnAudioChainBypassed(slot);
@@ -1840,8 +2003,11 @@ public class MainActivity extends AppCompatActivity {
         titleRow.addView(enabled);
 
         TextView name = new TextView(this);
-        name.setTextSize(18);
-        name.setPadding(12, 0, 12, 0);
+        name.setTextSize(13);
+        name.setTextColor(getColor(R.color.text_primary));
+        name.setTypeface(Typeface.create("sans-serif-medium",
+                Typeface.NORMAL));
+        name.setPadding(dp(10), 0, 0, 0);
         name.setText((slot + 1) + ". " + (midi
                 ? engine.getYawnMidiChainName(slot)
                 : engine.getYawnAudioChainName(slot)));
@@ -1932,7 +2098,8 @@ public class MainActivity extends AppCompatActivity {
         block.setPadding(0, dp(12), 0, 0);
 
         TextView label = new TextView(this);
-        label.setTextSize(16);
+        label.setTextSize(12);
+        label.setTextColor(getColor(R.color.text_secondary));
         label.setPadding(0, dp(8), 0, dp(4));
         label.setText("Add effect");
         block.addView(label);
@@ -1949,25 +2116,29 @@ public class MainActivity extends AppCompatActivity {
                     : engine.getYawnAudioEffectName(i);
         }
         Spinner spinner = new Spinner(this);
-        spinner.setAdapter(new ArrayAdapter<String>(this,
-                android.R.layout.simple_spinner_dropdown_item, names));
+        spinner.setAdapter(spinnerAdapter(names));
         spinner.setLayoutParams(new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
         row.addView(spinner);
 
         Button add = new Button(this);
         add.setText("Add");
-        add.setTextSize(14);
-        add.setMinHeight(dp(48));
-        add.setMinimumHeight(dp(48));
+        add.setTextSize(10);
+        add.setBackgroundResource(R.drawable.bg_button_primary);
+        add.setTextColor(getColorStateList(
+                R.color.button_primary_text_selector));
+        add.setMinHeight(dp(44));
+        add.setMinimumHeight(dp(44));
         add.setPadding(dp(12), dp(8), dp(12), dp(8));
         LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         addParams.setMargins(dp(8), 0, 0, 0);
         add.setLayoutParams(addParams);
-        add.setEnabled(count < (midi ? YawnEngineLimits.MIDI_CHAIN
-                : YawnEngineLimits.AUDIO_CHAIN));
+        boolean chainFull = count >= (midi ? YawnEngineLimits.MIDI_CHAIN
+                : YawnEngineLimits.AUDIO_CHAIN);
+        add.setEnabled(!chainFull);
+        add.setAlpha(chainFull ? 0.35f : 1.0f);
         add.setOnClickListener(v -> {
             int type = spinner.getSelectedItemPosition();
             int slot = midi ? engine.addYawnMidiEffect(type)
@@ -1988,13 +2159,17 @@ public class MainActivity extends AppCompatActivity {
     private Button smallButton(String text, boolean enabled, Runnable action) {
         Button button = new Button(this);
         button.setText(text);
-        button.setTextSize(14);
+        button.setTextSize(9);
+        button.setTextColor(getColorStateList(
+                R.color.button_text_selector));
+        button.setBackgroundResource(R.drawable.bg_button_secondary);
         button.setMinWidth(0);
         button.setMinimumWidth(0);
-        button.setMinHeight(dp(48));
-        button.setMinimumHeight(dp(48));
-        button.setPadding(dp(8), dp(8), dp(8), dp(8));
+        button.setMinHeight(dp(40));
+        button.setMinimumHeight(dp(40));
+        button.setPadding(dp(4), dp(6), dp(4), dp(6));
         button.setEnabled(enabled);
+        button.setAlpha(enabled ? 1.0f : 0.35f);
         button.setOnClickListener(v -> action.run());
         return button;
     }
@@ -2004,11 +2179,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void installCollapsibleXmlSections() {
-        View scroll = findViewById(R.id.optionsScrollView);
-        if (!(scroll instanceof ScrollView)) {
+        if (optionsScrollView == null) {
+            optionsScrollView = findViewById(R.id.optionsScrollView);
+        }
+        if (optionsScrollView == null) {
             return;
         }
-        View child = ((ScrollView) scroll).getChildAt(0);
+        View child = optionsScrollView.getChildAt(0);
         if (!(child instanceof LinearLayout)) {
             return;
         }
@@ -2016,23 +2193,32 @@ public class MainActivity extends AppCompatActivity {
         List<TextView> headers = new ArrayList<>();
         List<List<View>> groups = new ArrayList<>();
         List<Boolean> collapsed = new ArrayList<>();
+        List<String> tabs = new ArrayList<>();
         TextView currentHeader = null;
         List<View> currentGroup = null;
         boolean currentCollapsed = false;
+        String currentTab = "play";
 
         for (int i = 0; i < root.getChildCount(); i++) {
             View view = root.getChildAt(i);
             if (view instanceof TextView) {
                 Object tag = view.getTag();
-                if ("section".equals(tag) || "section_collapsed".equals(tag)) {
+                if (tag != null && tag.toString().startsWith("section")) {
                     if (currentHeader != null) {
                         headers.add(currentHeader);
                         groups.add(currentGroup);
                         collapsed.add(currentCollapsed);
+                        tabs.add(currentTab);
                     }
+                    String rawTag = tag.toString();
                     currentHeader = (TextView) view;
                     currentGroup = new ArrayList<>();
-                    currentCollapsed = "section_collapsed".equals(tag);
+                    currentCollapsed = rawTag.startsWith("section_collapsed");
+                    currentTab = "play";
+                    int colon = rawTag.indexOf(':');
+                    if (colon >= 0 && colon + 1 < rawTag.length()) {
+                        currentTab = rawTag.substring(colon + 1);
+                    }
                     continue;
                 }
             }
@@ -2044,29 +2230,194 @@ public class MainActivity extends AppCompatActivity {
             headers.add(currentHeader);
             groups.add(currentGroup);
             collapsed.add(currentCollapsed);
+            tabs.add(currentTab);
+        }
+        if (headers.isEmpty()) {
+            return;
         }
 
+        root.removeAllViews();
+        settingsCards.clear();
+        settingsCardTabs.clear();
+
         for (int i = 0; i < headers.size(); i++) {
-            TextView header = headers.get(i);
-            List<View> group = groups.get(i);
+            final TextView header = headers.get(i);
+            final List<View> group = groups.get(i);
+            final String tab = tabs.get(i);
             String title = header.getText().toString();
-            if (title.startsWith("▼ ") || title.startsWith("▶ ")) {
+            if (title.startsWith("▼ ") || title.startsWith("▶ ")
+                    || title.startsWith("▾ ") || title.startsWith("▸ ")) {
                 title = title.substring(2);
             }
             final String baseTitle = title;
-            final List<View> content = group;
             final boolean[] expanded = {!collapsed.get(i)};
-            header.setText((expanded[0] ? "▼ " : "▶ ") + baseTitle);
-            for (View view : content) {
-                view.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundResource(R.drawable.bg_card);
+            card.setClipToOutline(true);
+            LinearLayout.LayoutParams cardParams =
+                    new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT);
+            cardParams.bottomMargin = dp(8);
+            card.setLayoutParams(cardParams);
+
+            styleSectionHeader(header);
+            header.setText((expanded[0] ? "▾ " : "▸ ") + baseTitle);
+            header.setTag(null);
+            header.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+
+            final LinearLayout content = new LinearLayout(this);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(14), dp(4), dp(14), dp(14));
+            for (int j = 0; j < group.size(); j++) {
+                if (j > 0) {
+                    View spacer = new View(this);
+                    spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, dp(6)));
+                    content.addView(spacer);
+                }
+                content.addView(group.get(j));
             }
+
+            final View divider = new View(this);
+            divider.setBackgroundColor(getColor(R.color.divider));
+            LinearLayout.LayoutParams dividerParams =
+                    new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+            dividerParams.setMargins(dp(14), 0, dp(14), 0);
+            divider.setLayoutParams(dividerParams);
+
+            card.addView(header);
+            card.addView(divider);
+            card.addView(content);
+            root.addView(card);
+
+            content.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+            divider.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
             header.setOnClickListener(v -> {
                 expanded[0] = !expanded[0];
-                for (View view : content) {
-                    view.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
-                }
-                header.setText((expanded[0] ? "▼ " : "▶ ") + baseTitle);
+                content.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+                divider.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+                header.setText((expanded[0] ? "▾ " : "▸ ") + baseTitle);
             });
+
+            settingsCards.add(card);
+            settingsCardTabs.add(tab);
+        }
+    }
+
+    private void styleSectionHeader(TextView header) {
+        header.setTextSize(13);
+        header.setTextColor(getColor(R.color.accent));
+        header.setTypeface(Typeface.create("sans-serif-medium",
+                Typeface.NORMAL));
+        header.setLetterSpacing(0.06f);
+        header.setIncludeFontPadding(false);
+        header.setPadding(dp(14), dp(12), dp(14), dp(10));
+    }
+
+    private void setupSettingsTabs() {
+        settingsTabButtons.clear();
+        settingsTabKeys.clear();
+        int[] ids = {R.id.tabPlay, R.id.tabSound, R.id.tabFx,
+                R.id.tabTune, R.id.tabIo, R.id.tabMod};
+        String[] keys = {"play", "sound", "fx", "tune", "io", "mod"};
+        for (int i = 0; i < ids.length; i++) {
+            TextView button = findViewById(ids[i]);
+            if (button == null) {
+                continue;
+            }
+            final String key = keys[i];
+            button.setOnClickListener(v -> selectSettingsTab(key));
+            settingsTabButtons.add(button);
+            settingsTabKeys.add(key);
+        }
+        currentSettingsTab = prefs.readString("settingsTab", "play");
+        selectSettingsTab(currentSettingsTab);
+    }
+
+    private void selectSettingsTab(String tab) {
+        if (tab == null) {
+            tab = "play";
+        }
+        boolean found = false;
+        for (int i = 0; i < settingsTabKeys.size(); i++) {
+            boolean selected = settingsTabKeys.get(i).equals(tab);
+            settingsTabButtons.get(i).setSelected(selected);
+            found |= selected;
+        }
+        if (!found) {
+            tab = "play";
+        }
+        for (int i = 0; i < settingsCards.size(); i++) {
+            settingsCards.get(i).setVisibility(
+                    settingsCardTabs.get(i).equals(tab)
+                            ? View.VISIBLE : View.GONE);
+        }
+        currentSettingsTab = tab;
+        if (prefs != null) {
+            prefs.writeString("settingsTab", tab);
+        }
+        if (optionsScrollView != null) {
+            optionsScrollView.scrollTo(0, 0);
+        }
+    }
+
+    private void showSettings() {
+        if (settingsPanel == null) {
+            return;
+        }
+        settingsPanel.setVisibility(View.VISIBLE);
+        if (menuView != null) {
+            menuView.setVisibility(View.GONE);
+        }
+        selectSettingsTab(currentSettingsTab);
+    }
+
+    private void hideSettings() {
+        if (settingsPanel == null) {
+            return;
+        }
+        settingsPanel.setVisibility(View.GONE);
+        if (menuView != null) {
+            menuView.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void setupScopeModeControls() {
+        scopeModeWave = findViewById(R.id.scopeModeWave);
+        scopeModeFft = findViewById(R.id.scopeModeFft);
+        scopeModeBoth = findViewById(R.id.scopeModeBoth);
+        if (scopeModeWave == null || scopeModeFft == null
+                || scopeModeBoth == null) {
+            return;
+        }
+        scopeMode = prefs.readInt("scopeMode", Scope.MODE_BOTH);
+        scopeModeWave.setOnClickListener(v -> setScopeMode(Scope.MODE_WAVE));
+        scopeModeFft.setOnClickListener(v -> setScopeMode(Scope.MODE_FFT));
+        scopeModeBoth.setOnClickListener(v -> setScopeMode(Scope.MODE_BOTH));
+        applyScopeMode();
+    }
+
+    private void setScopeMode(int mode) {
+        scopeMode = mode;
+        prefs.writeInt("scopeMode", mode);
+        applyScopeMode();
+    }
+
+    private void applyScopeMode() {
+        if (scopeModeWave == null) {
+            return;
+        }
+        scopeModeWave.setSelected(scopeMode == Scope.MODE_WAVE);
+        scopeModeFft.setSelected(scopeMode == Scope.MODE_FFT);
+        scopeModeBoth.setSelected(scopeMode == Scope.MODE_BOTH);
+        if (scope != null) {
+            scope.setMode(scopeMode);
         }
     }
 
@@ -2075,19 +2426,56 @@ public class MainActivity extends AppCompatActivity {
         static final int AUDIO_CHAIN = 8;
     }
 
+    private ArrayAdapter<String> spinnerAdapter(String[] values) {
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, values);
+        adapter.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item);
+        return adapter;
+    }
+
+    private void addInfoText(LinearLayout parent, String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextSize(12);
+        view.setTextColor(getColor(R.color.text_secondary));
+        view.setPadding(0, dp(6), 0, dp(6));
+        parent.addView(view);
+    }
+
     private void addParamSlider(LinearLayout parent, String name, float min,
                                 float max, float value, ParamSetter setter) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(0, dp(6), 0, dp(6));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView label = new TextView(this);
-        label.setTextSize(16);
-        parent.addView(label);
+        label.setText(name);
+        label.setTextSize(12);
+        label.setTextColor(getColor(R.color.text_secondary));
+        label.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+        header.addView(label);
+
+        TextView valueView = new TextView(this);
+        valueView.setTextSize(12);
+        valueView.setTypeface(Typeface.MONOSPACE);
+        valueView.setTextColor(getColor(R.color.accent));
+        valueView.setText(formatParam(value));
+        header.addView(valueView);
+
         SeekBar bar = new SeekBar(this);
         bar.setMax(1000);
+        bar.setContentDescription(name);
         final float range = max - min;
         int progress = range > 0.0f
                 ? Math.round((value - min) / range * 1000.0f) : 0;
         progress = Math.max(0, Math.min(1000, progress));
         bar.setProgress(progress);
-        label.setText(String.format(Locale.US, "%s: %.2f", name, value));
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progressValue,
@@ -2096,8 +2484,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 float newValue = min + range * progressValue / 1000.0f;
-                label.setText(String.format(Locale.US, "%s: %.2f", name,
-                        newValue));
+                valueView.setText(formatParam(newValue));
                 setter.set(newValue);
             }
 
@@ -2110,7 +2497,13 @@ public class MainActivity extends AppCompatActivity {
                 scheduleSaveSynthState();
             }
         });
-        parent.addView(bar);
+        block.addView(header);
+        block.addView(bar);
+        parent.addView(block);
+    }
+
+    private static String formatParam(float value) {
+        return String.format(Locale.US, "%.2f", value);
     }
 
     private interface ParamSetter {
@@ -2144,6 +2537,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         saveSynthStateNow();
+        if (modMatrix != null) {
+            modMatrix.onPause();
+        }
         resumed = false;
         if (mHandler != null) {
             mHandler.removeCallbacks(audioResumeRetry);
@@ -2173,6 +2569,9 @@ public class MainActivity extends AppCompatActivity {
         if (mHandler != null && screenUpdater != null) {
             mHandler.removeCallbacks(screenUpdater);
             mHandler.postDelayed(screenUpdater, updateInterval);
+        }
+        if (modMatrix != null) {
+            modMatrix.onResume();
         }
     }
 

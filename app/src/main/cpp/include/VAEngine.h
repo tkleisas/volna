@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 
 #include "Delay.h"
 #include "EngineEventQueue.h"
 #include "SynthVoice.h"
+#include "effects/Limiter.h"
 
 template <int numvoices, int WAVEFORM_COUNT, int WTLEN>
 class VAEngine : public oboe::AudioStreamCallback {
@@ -27,6 +29,17 @@ public:
         if (this->sampleRate <= 0) {
             this->sampleRate = 48000;
         }
+        mSafetyLimiterEffect.init(sampleRate, 2048);
+        mSafetyLimiterEffect.setParameter(
+            yawn::effects::Limiter::kCeiling, -1.0f);
+        mSafetyLimiterEffect.setParameter(
+            yawn::effects::Limiter::kRelease, 80.0f);
+        mSafetyLimiterEffect.setParameter(
+            yawn::effects::Limiter::kLookahead, 3.0f);
+        mSafetyLimiterEffect.reset();
+        mSafetyLimiter.store(true);
+        mPolyphonyLeveling.store(true);
+        mPolyphonyGain = 1.0f;
 
         delay = new Delay(this->sampleRate);
         delay->SetFeedback(0.5f);
@@ -53,6 +66,9 @@ public:
         SetupRampDown(0.0f, 1.0f, 40);
         SetStartTrim(100);
         SetEndTrim(250);
+        crossfadeSamples = static_cast<int>(sampleRate / 50); // 20 ms
+        playFadeSamples = static_cast<int>(sampleRate / 100); // 10 ms
+        playFadeRemaining = 0;
         audioSuspended.store(false);
         dspLoad.store(0.0f);
         dspPeak.store(0.0f);
@@ -79,8 +95,18 @@ public:
     void pauseAudio() {
         audioSuspended.store(true);
         if (outStream) {
-            outStream->requestStop();
+            outStream->stop();
         }
+        for (int i = 0; i < numvoices; i++) {
+            voices_notes[i] = -1;
+            mSynthVoice[i].Reset();
+        }
+        recording = false;
+        playing = false;
+        playFadeRemaining = 0;
+        loopRecordingAtomic.store(false);
+        loopPlayingAtomic.store(false);
+        loopPlayIndexAtomic.store(0);
     }
 
     void resumeAudio() {
@@ -175,14 +201,29 @@ public:
         float* floatData = static_cast<float*>(audioData);
         processEvents();
 
+        int activeVoices = 0;
+        for (int v = 0; v < numvoices; ++v) {
+            if (voices_notes[v] >= 0) {
+                activeVoices++;
+            }
+        }
+        const int effectiveVoices = std::max(1, activeVoices);
+        const float polyTarget = mPolyphonyLeveling.load()
+            ? 1.0f / std::sqrt(static_cast<float>(effectiveVoices))
+            : 1.0f;
+        const float polySmooth = 1.0f - std::exp(
+            -1.0f / (0.02f * static_cast<float>(sampleRate)));
+
         for (int i = 0; i < numFrames; ++i) {
+            mPolyphonyGain += polySmooth * (polyTarget - mPolyphonyGain);
             float sampleValue = Process();
             if (playing) {
                 sampleValue += nextPlaybackSample();
             }
+            sampleValue *= mPolyphonyGain;
 
             wavedata[index] = sampleValue;
-            index = (index + 1) % 256;
+            index = (index + 1) % kWaveformSize;
 
             for (int j = 0; j < kChannelCount; j++) {
                 floatData[i * kChannelCount + j] = sampleValue;
@@ -191,6 +232,14 @@ public:
             if (recording) {
                 recordSample(sampleValue);
             }
+        }
+        loopRecordingAtomic.store(recording);
+        loopPlayingAtomic.store(playing);
+        loopRecordLengthAtomic.store(recIndexEnd);
+        loopPlayIndexAtomic.store(playIndex);
+        loopPlayEndAtomic.store(playIndexEnd);
+        if (mSafetyLimiter.load()) {
+            mSafetyLimiterEffect.process(floatData, numFrames, kChannelCount);
         }
         const double elapsed = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - callbackStart).count();
@@ -364,6 +413,20 @@ public:
         return wavedata;
     }
 
+    static constexpr int kWaveformSize = 1024;
+
+    void copyWaveform(float* out, int length) const {
+        if (out == nullptr || length <= 0) {
+            return;
+        }
+        const int count = std::min(length, kWaveformSize);
+        const int start =
+            (index - count + kWaveformSize) % kWaveformSize;
+        for (int i = 0; i < count; ++i) {
+            out[i] = wavedata[(start + i) % kWaveformSize];
+        }
+    }
+
     float getDspLoad() const { return dspLoad.load(std::memory_order_relaxed); }
     float getDspPeak() const { return dspPeak.load(std::memory_order_relaxed); }
     void resetDspPeak() { dspPeak.store(0.0f, std::memory_order_relaxed); }
@@ -381,6 +444,50 @@ public:
         event.a = flag ? 1 : 0;
         pushEvent(event);
     }
+
+    void setSafetyLimiter(bool enabled) {
+        EngineEvent event;
+        event.type = EngineEvent::Type::SetSafetyLimiter;
+        event.a = enabled ? 1 : 0;
+        pushEvent(event);
+    }
+
+    void setPolyphonyLeveling(bool enabled) {
+        EngineEvent event;
+        event.type = EngineEvent::Type::SetPolyphonyLeveling;
+        event.a = enabled ? 1 : 0;
+        pushEvent(event);
+    }
+
+    void clearLoop() {
+        EngineEvent event;
+        event.type = EngineEvent::Type::ClearLoop;
+        pushEvent(event);
+    }
+
+    float loopRecordProgress() const {
+        if (recBufferLen <= 0) {
+            return 0.0f;
+        }
+        return static_cast<float>(
+                   loopRecordLengthAtomic.load()) /
+               static_cast<float>(recBufferLen);
+    }
+
+    float loopPlayProgress() const {
+        const int end = loopPlayEndAtomic.load();
+        if (end <= 0) {
+            return 0.0f;
+        }
+        const float progress = static_cast<float>(
+                                   loopPlayIndexAtomic.load()) /
+                               static_cast<float>(end);
+        return std::min(1.0f, std::max(0.0f, progress));
+    }
+
+    bool isLoopRecording() const { return loopRecordingAtomic.load(); }
+    bool isLoopPlaying() const { return loopPlayingAtomic.load(); }
+    bool hasLoop() const { return loopRecordLengthAtomic.load() > 0; }
 
     void SetupRampUp(float upMinValue, float upMaxValue, int ms) {
         upSamples = static_cast<int>((static_cast<float>(ms) * sampleRate) / 1000.0f);
@@ -526,6 +633,21 @@ private:
             case EngineEvent::Type::SetRecord:
                 doSetRecord(event.a != 0);
                 break;
+            case EngineEvent::Type::ClearLoop:
+                resetTransportState();
+                break;
+            case EngineEvent::Type::SetSafetyLimiter:
+                mSafetyLimiter.store(event.a != 0);
+                if (event.a != 0) {
+                    mSafetyLimiterEffect.reset();
+                }
+                break;
+            case EngineEvent::Type::SetPolyphonyLeveling:
+                mPolyphonyLeveling.store(event.a != 0);
+                if (event.a == 0) {
+                    mPolyphonyGain = 1.0f;
+                }
+                break;
             default:
                 break;
         }
@@ -667,30 +789,43 @@ private:
         playIndexEnd = 0;
         recording = false;
         playing = false;
+        playFadeRemaining = 0;
+        loopRecordingAtomic.store(false);
+        loopPlayingAtomic.store(false);
+        loopRecordLengthAtomic.store(0);
+        loopPlayIndexAtomic.store(0);
+        loopPlayEndAtomic.store(0);
     }
 
     float nextPlaybackSample() {
         if (playIndexEnd <= 0 || playIndex >= playIndexEnd) {
             return 0.0f;
         }
-
-        float gain = 1.0f;
-        if (upSamples > 0 && playIndex < upSamples) {
-            gain = static_cast<float>(playIndex) / static_cast<float>(upSamples);
-        }
-        if (downSamples > 0) {
-            const int remaining = playIndexEnd - playIndex;
-            if (remaining < downSamples) {
-                const float downGain =
-                    static_cast<float>(remaining) / static_cast<float>(downSamples);
-                gain = std::min(gain, downGain);
+        const int crossfade = std::min(crossfadeSamples, playIndexEnd / 2);
+        const int crossfadeStart = playIndexEnd - crossfade;
+        float sampleValue;
+        if (crossfade > 0 && playIndex >= crossfadeStart) {
+            const int k = playIndex - crossfadeStart;
+            const float t = static_cast<float>(k + 1) /
+                            static_cast<float>(crossfade);
+            sampleValue = playBuffer[playIndex] * (1.0f - t) +
+                          playBuffer[k] * t;
+            ++playIndex;
+            if (playIndex >= playIndexEnd) {
+                playIndex = crossfade;
+            }
+        } else {
+            sampleValue = playBuffer[playIndex];
+            ++playIndex;
+            if (playIndex >= playIndexEnd) {
+                playIndex = crossfade;
             }
         }
-
-        const float sampleValue = playBuffer[playIndex] * gain;
-        ++playIndex;
-        if (playIndex >= playIndexEnd) {
-            playIndex = 0;
+        if (playFadeRemaining > 0 && playFadeSamples > 0) {
+            sampleValue *= 1.0f -
+                static_cast<float>(playFadeRemaining) /
+                static_cast<float>(playFadeSamples);
+            --playFadeRemaining;
         }
         return sampleValue;
     }
@@ -738,7 +873,13 @@ private:
         playing = flag && playIndexEnd > 0;
         if (playing) {
             playIndex = 0;
+            playFadeRemaining = playFadeSamples;
+        } else {
+            playFadeRemaining = 0;
         }
+        loopPlayingAtomic.store(playing);
+        loopPlayIndexAtomic.store(playIndex);
+        loopPlayEndAtomic.store(playIndexEnd);
     }
 
     void doSetRecord(bool flag) {
@@ -747,9 +888,20 @@ private:
             recIndexEnd = 0;
             recIndex = 0;
             recording = true;
+            playing = false;
+            playIndex = 0;
+            playFadeRemaining = 0;
+            loopRecordingAtomic.store(true);
+            loopPlayingAtomic.store(false);
+            loopRecordLengthAtomic.store(0);
+            loopPlayIndexAtomic.store(0);
+            loopPlayEndAtomic.store(0);
         } else {
             recording = false;
             preparePlaybackBuffer();
+            loopRecordingAtomic.store(false);
+            loopRecordLengthAtomic.store(recIndexEnd);
+            loopPlayEndAtomic.store(playIndexEnd);
         }
     }
 
@@ -763,9 +915,13 @@ private:
     std::atomic<bool> audioSuspended{false};
     std::atomic<float> dspLoad{0.0f};
     std::atomic<float> dspPeak{0.0f};
+    yawn::effects::Limiter mSafetyLimiterEffect;
+    std::atomic<bool> mSafetyLimiter{true};
+    std::atomic<bool> mPolyphonyLeveling{true};
+    float mPolyphonyGain = 1.0f;
     int kChannelCount = 2;
     int sampleRate = 48000;
-    float wavedata[256] = {};
+    float wavedata[kWaveformSize] = {};
     int index = 0;
     float* recBuffer = nullptr;
     int recIndexStart = 0;
@@ -789,6 +945,14 @@ private:
     int downTimeMs = 0;
     int trimEnd = 0;
     int trimStart = 0;
+    int crossfadeSamples = 0;
+    int playFadeSamples = 0;
+    int playFadeRemaining = 0;
+    std::atomic<bool> loopRecordingAtomic{false};
+    std::atomic<bool> loopPlayingAtomic{false};
+    std::atomic<int> loopRecordLengthAtomic{0};
+    std::atomic<int> loopPlayIndexAtomic{0};
+    std::atomic<int> loopPlayEndAtomic{0};
     float delayLevel = 0.0f;
     Delay* delay = nullptr;
     EngineEventQueue eventQueue;

@@ -1,6 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#6200EE</color>
-    <color name="colorPrimaryDark">#3700B3</color>
-    <color name="colorAccent">#03DAC5</color>
+    <color name="colorPrimary">#0B1218</color>
+    <color name="colorPrimaryDark">#05080B</color>
+    <color name="colorAccent">#5CFFC0</color>
+
+    <color name="bg">#05080B</color>
+    <color name="bg_top">#070C10</color>
+    <color name="panel">#0B1218</color>
+    <color name="panel_alt">#0E161D</color>
+    <color name="card">#0B1319</color>
+    <color name="card_alt">#101A21</color>
+    <color name="stroke">#1B2C35</color>
+    <color name="stroke_strong">#29414D</color>
+    <color name="divider">#16252D</color>
+
+    <color name="text_primary">#E6F1F5</color>
+    <color name="text_secondary">#8FA3AD</color>
+    <color name="text_tertiary">#5E707A</color>
+    <color name="text_disabled">#44535C</color>
+
+    <color name="accent">#5CFFC0</color>
+    <color name="accent_red">#FF5A6E</color>
+    <color name="accent_dim">#2E5CFFC0</color>
+    <color name="accent_soft">#145CFFC0</color>
+    <color name="accent_ripple">#335CFFC0</color>
+
+    <color name="button_text_dark">#04120C</color>
+    <color name="danger">#FF5A6E</color>
+    <color name="warning">#FFB35C</color>
+    <color name="success">#5CFFC0</color>
+    <color name="track">#17262E</color>
 </resources>

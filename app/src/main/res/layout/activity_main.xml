@@ -1,785 +1,1095 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000"
-    android:orientation="horizontal"
-
+    android:background="@drawable/bg_root"
     tools:context=".MainActivity">
-    <org.bokontep.wavesynth.Scope
-        android:id="@+id/mscope"
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="0.45"
-        >
 
-    </org.bokontep.wavesynth.Scope>
-
-    <ScrollView
-        android:id="@+id/optionsScrollView"
-        android:layout_width="0dp"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_weight="0.45"
-        >
+        android:orientation="horizontal">
+
+        <FrameLayout
+            android:id="@+id/performanceArea"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <org.bokontep.wavesynth.Scope
+                android:id="@+id/mscope"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_scope_full" />
+
+        </FrameLayout>
 
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minWidth="800px"
-            android:orientation="vertical">
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="30sp"
-                android:textColor="#ff0000"
-                android:text="ВОКОИТЕР"/>
-
-            <TextView
-                android:id="@+id/tv_version"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="30sp"
-                android:text="волна v.0.8c"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <Button
-                android:id="@+id/closeSettingsButton"
-                android:textSize="20sp"
-
-                android:layout_width="match_parent"
-                android:layout_height = "wrap_content"
-                android:text = "Close Settings"
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-                        <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Performance"
-                android:tag="section" />
-
-<TextView
-                android:id="@+id/gridSizeText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Grid size: 160 px per note" />
-
-            <SeekBar
-                android:id="@+id/gridSizeSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="8"
-                android:max="300"/>
-
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="12dp" />
-
-            <TextView
-                android:id="@+id/dspLoadText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="18sp"
-                android:textColor="#00ff00"
-                android:text="DSP: --" />
-
-            <Button
-                android:id="@+id/resetDspPeakButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Reset DSP peak" />
-
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="12dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Sound engine"
-                android:tag="section" />
-
-            <Spinner
-                android:id="@+id/engineSpinner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+            android:id="@+id/settingsPanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="@dimen/top_bar_height"
+            android:layout_weight="1"
+            android:background="@drawable/bg_panel"
+            android:clickable="true"
+            android:focusable="true"
+            android:orientation="vertical"
+            android:visibility="gone">
 
             <LinearLayout
-                android:id="@+id/yawnControls"
+                android:id="@+id/settingsTabBar"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
+                android:layout_height="@dimen/tab_bar_height"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp">
+
+                <TextView
+                    android:id="@+id/tabPlay"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_tab"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:letterSpacing="0.06"
+                    android:text="PLAY"
+                    android:textColor="@color/tab_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tabSound"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_tab"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:letterSpacing="0.06"
+                    android:text="SOUND"
+                    android:textColor="@color/tab_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tabFx"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_tab"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:letterSpacing="0.06"
+                    android:text="FX"
+                    android:textColor="@color/tab_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tabTune"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_tab"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:letterSpacing="0.06"
+                    android:text="TUNE"
+                    android:textColor="@color/tab_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tabIo"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_tab"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:letterSpacing="0.06"
+                    android:text="I/O"
+                    android:textColor="@color/tab_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tabMod"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_margin="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_tab"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:letterSpacing="0.06"
+                    android:text="MOD"
+                    android:textColor="@color/tab_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/closeSettingsButton"
+                    android:layout_width="40dp"
+                    android:layout_height="match_parent"
+                    android:clickable="true"
+                    android:contentDescription="Close settings"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:text="×"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="22sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider" />
+
+            <ScrollView
+                android:id="@+id/optionsScrollView"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:clipToPadding="false"
+                android:fadeScrollbars="false"
+                android:fillViewport="true"
+                android:overScrollMode="never"
+                android:scrollbarStyle="insideOverlay">
+
+                <LinearLayout
+                    android:id="@+id/settingsContent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="8dp">
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section:play"
+                        android:text="Performance" />
+
+                    <TextView
+                        android:id="@+id/gridSizeText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Grid size: 160 px per note" />
+
+                    <SeekBar
+                        android:id="@+id/gridSizeSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="300"
+                        android:min="8" />
+
+                    <Button
+                        android:id="@+id/resetDspPeakButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Reset DSP peak" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Legato" />
+
+                    <ToggleButton
+                        android:id="@+id/legatoToggleButton"
+                        style="@style/Widget.Volna.Toggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="LEGATO"
+                        android:textOff="LEGATO OFF"
+                        android:textOn="LEGATO ON" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Output limiter" />
+
+                    <ToggleButton
+                        android:id="@+id/safetyLimiterToggle"
+                        style="@style/Widget.Volna.Toggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="LIMITER"
+                        android:textOff="LIMITER OFF"
+                        android:textOn="LIMITER ON" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Prevents hard clipping on dense chords."
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Polyphony leveling" />
+
+                    <ToggleButton
+                        android:id="@+id/polyphonyLevelingToggle"
+                        style="@style/Widget.Volna.Toggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="POLY LEVEL"
+                        android:textOff="POLY LEVEL OFF"
+                        android:textOn="POLY LEVEL ON" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Reduces gain as more notes are held."
+                        android:textSize="11sp" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:play"
+                        android:text="Appearance" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Red phosphor" />
+
+                    <ToggleButton
+                        android:id="@+id/redToggleButton"
+                        style="@style/Widget.Volna.Toggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="RED"
+                        android:textOff="GREEN"
+                        android:textOn="RED" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Changes the scope and oscillator preview accent."
+                        android:textSize="11sp" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:play"
+                        android:text="About" />
+
+                    <TextView
+                        android:id="@+id/tv_version"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:text="by bokontep"
+                        android:textColor="@color/accent"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:autoLink="web"
+                        android:linksClickable="true"
+                        android:text="https://github.com/bokontep&#10;https://www.bokontep.gr"
+                        android:textColorLink="@color/accent"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="DSP engine: YAWN · Audio I/O: Oboe"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section:sound"
+                        android:text="Sound engine" />
+
+                    <Spinner
+                        android:id="@+id/engineSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <LinearLayout
+                        android:id="@+id/soundControls"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:sound"
+                        android:text="Classic oscillator" />
+
+                    <TextView
+                        android:id="@+id/osc1AttackText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc1 Attack" />
+
+                    <SeekBar
+                        android:id="@+id/osc1AttackSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc1DecayText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc1 Decay" />
+
+                    <SeekBar
+                        android:id="@+id/osc1DecaySeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc1SustainText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc1 Sustain" />
+
+                    <SeekBar
+                        android:id="@+id/osc1SustainSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc1ReleaseText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc1 Release" />
+
+                    <SeekBar
+                        android:id="@+id/osc1ReleaseSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc2AttackText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc2 Attack" />
+
+                    <SeekBar
+                        android:id="@+id/osc2AttackSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc2DecayText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc2 Decay" />
+
+                    <SeekBar
+                        android:id="@+id/osc2DecaySeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc2SustainText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc2 Sustain" />
+
+                    <SeekBar
+                        android:id="@+id/osc2SustainSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc2ReleaseText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Osc2 Release" />
+
+                    <SeekBar
+                        android:id="@+id/osc2ReleaseSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/oscSpreadText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Oscillator Spread" />
+
+                    <SeekBar
+                        android:id="@+id/maxSpreadSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="127"
+                        android:min="0" />
+
+                    <TextView
+                        android:id="@+id/osc1WaveText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Oscillator 1 Wave" />
+
+                    <SeekBar
+                        android:id="@+id/osc1WaveSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="0" />
+
+                    <org.bokontep.wavesynth.WaveDisplay
+                        android:id="@+id/osc1WaveDisplay"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:background="@drawable/bg_wave_preview"
+                        android:clipToOutline="true" />
+
+                    <TextView
+                        android:id="@+id/osc1WaveControlText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Oscillator 1 Wave Control" />
+
+                    <SeekBar
+                        android:id="@+id/osc1WaveControlSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="-255" />
+
+                    <TextView
+                        android:id="@+id/osc2WaveText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Oscillator 2 Wave" />
+
+                    <SeekBar
+                        android:id="@+id/osc2WaveSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="0" />
+
+                    <org.bokontep.wavesynth.WaveDisplay
+                        android:id="@+id/osc2WaveDisplay"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:background="@drawable/bg_wave_preview"
+                        android:clipToOutline="true" />
+
+                    <TextView
+                        android:id="@+id/osc2WaveControlText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Oscillator 2 Wave Control" />
+
+                    <SeekBar
+                        android:id="@+id/osc2WaveControlSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="-255" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:sound"
+                        android:text="Wavetable bank" />
+
+                    <TextView
+                        android:id="@+id/customWavetableText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Factory wavetables" />
+
+                    <Button
+                        android:id="@+id/importWavetableButton"
+                        style="@style/Widget.Volna.Button.Primary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Import .vwt wavetable..." />
+
+                    <Button
+                        android:id="@+id/resetWavetableButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Restore factory bank" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section:fx"
+                        android:text="Effects" />
+
+                    <LinearLayout
+                        android:id="@+id/fxControls"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:fx"
+                        android:text="Legacy delay" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Delay Level" />
+
+                    <SeekBar
+                        android:id="@+id/delayLevelSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="0" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Delay Time (samples)" />
+
+                    <SeekBar
+                        android:id="@+id/delayTimeSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="0" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Delay Feedback" />
+
+                    <SeekBar
+                        android:id="@+id/delayFeedbackSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="255"
+                        android:min="0" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section:tune"
+                        android:text="Tuning" />
+
+                    <TextView
+                        android:id="@+id/tetText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Tuning Equal Temperament (TET): 12" />
+
+                    <SeekBar
+                        android:id="@+id/tetSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="48"
+                        android:min="2" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Root note" />
+
+                    <Spinner
+                        android:id="@+id/rootNoteSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Scale" />
+
+                    <Spinner
+                        android:id="@+id/scaleSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <TextView
+                        android:id="@+id/tuneText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="A note frequency (Hz)" />
+
+                    <SeekBar
+                        android:id="@+id/tuneSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="5000"
+                        android:min="4000" />
+
+                    <TextView
+                        android:id="@+id/octaveFactorText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Octave factor (default 2.0)" />
+
+                    <SeekBar
+                        android:id="@+id/octaveFactorSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="2500"
+                        android:min="1500" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Low register note offset" />
+
+                    <EditText
+                        android:id="@+id/lowOffsetEditText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="0" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Middle register note offset" />
+
+                    <EditText
+                        android:id="@+id/middleOffsetEditText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="12" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="High register note offset" />
+
+                    <EditText
+                        android:id="@+id/highOffsetEditText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="24" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:io"
+                        android:text="MIDI devices" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Select an input MIDI device" />
+
+                    <Spinner
+                        android:id="@+id/spinnerMidiDevice"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:entries="@array/senders" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Select an output MIDI device" />
+
+                    <Spinner
+                        android:id="@+id/spinnerInputMidiDevice"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:entries="@array/senders" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section_collapsed:io"
+                        android:text="RTP-MIDI" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Sessionless RTP-MIDI over Wi-Fi. Enter the YAWN host address."
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Host IP address" />
+
+                    <EditText
+                        android:id="@+id/rtpMidiHostEditText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="192.168.1.100"
+                        android:inputType="text" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="UDP port" />
+
+                    <EditText
+                        android:id="@+id/rtpMidiPortEditText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="5004" />
+
+                    <ToggleButton
+                        android:id="@+id/rtpMidiToggleButton"
+                        style="@style/Widget.Volna.Toggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="RTP-MIDI"
+                        android:textOff="RTP-MIDI OFF"
+                        android:textOn="RTP-MIDI ON" />
+
+                    <TextView
+                        android:id="@+id/rtpMidiStatusText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="RTP-MIDI off"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        style="@style/Widget.Volna.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="section:mod"
+                        android:text="Modulation" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Route sensor motion or magnetic field to synth or effect parameters. Rows are off by default; sensors run only while an enabled row exists."
+                        android:textSize="11sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingTop="8dp"
+                        android:paddingBottom="8dp">
+
+                        <org.bokontep.wavesynth.SensorIndicatorView
+                            android:id="@+id/modSensorIndicator"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp" />
 
                         <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Appearance"
-                android:tag="section_collapsed" />
+                            android:id="@+id/modStatusText"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:fontFamily="monospace"
+                            android:paddingStart="10dp"
+                            android:text="Sensors off"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
 
-<TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="RED Theme"
-                />
-            <ToggleButton
-                android:id="@+id/redToggleButton"
+                    <LinearLayout
+                        android:id="@+id/modMatrixContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
 
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="RED"
-                />
-                        <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Tuning"
-                android:tag="section" />
+                    <Button
+                        android:id="@+id/addModButton"
+                        style="@style/Widget.Volna.Button.Primary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Add modulation" />
 
-<TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Select root note" />
-            <Spinner
-                android:id="@+id/rootNoteSpinner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
+                    <Button
+                        android:id="@+id/calibrateModButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Calibrate sensors" />
 
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Select a scale" />
-
-            <Spinner
-                android:id="@+id/scaleSpinner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-
-            <TextView
-                android:id="@+id/tuneText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="A note frequency(Hz)"
-                />
-            <SeekBar
-                android:id = "@+id/tuneSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="4000"
-                android:max="5000"
-
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/octaveFactorText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="octave factor (default 2.0)"
-                />
-            <SeekBar
-                android:id = "@+id/octaveFactorSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="1500"
-                android:max="2500"
-
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/tetText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Tuning Equal Temperament (TET):" />
-
-            <SeekBar
-                android:id="@+id/tetSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="2"
-                android:max="48"/>
-
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Low Register Note Offset"
-                />
-            <EditText
-                android:id="@+id/lowOffsetEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="0"
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Middle Register Note Offset"
-                />
-            <EditText
-                android:id="@+id/middleOffsetEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="12"
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="High Register Note Offset"
-                />
-            <EditText
-                android:id="@+id/highOffsetEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="24"
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Legato"
-                />
-            <ToggleButton
-                android:id="@+id/legatoToggleButton"
-
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Legato"
-                />
-                        <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Classic oscillator"
-                android:tag="section_collapsed" />
-
-<TextView
-                android:id="@+id/osc1AttackText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc1 Attack" />
-
-            <SeekBar
-                android:id="@+id/osc1AttackSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc1DecayText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc1 Decay" />
-
-            <SeekBar
-                android:id="@+id/osc1DecaySeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc1SustainText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc1 Sustain" />
-
-            <SeekBar
-                android:id="@+id/osc1SustainSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc1ReleaseText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc1 Release"
-                />
-
-            <SeekBar
-                android:id="@+id/osc1ReleaseSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc2AttackText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc2 Attack" />
-
-            <SeekBar
-                android:id="@+id/osc2AttackSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc2DecayText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc2 Decay" />
-
-            <SeekBar
-                android:id="@+id/osc2DecaySeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc2SustainText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc2 Sustain" />
-
-            <SeekBar
-                android:id="@+id/osc2SustainSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc2ReleaseText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Osc2 Release" />
-
-            <SeekBar
-                android:id="@+id/osc2ReleaseSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/oscSpreadText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Oscillator Spread" />
-
-            <SeekBar
-                android:id="@+id/maxSpreadSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="127"/>
-
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc1WaveText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Oscillator 1 Wave" />
-            <SeekBar
-                android:id="@+id/osc1WaveSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <org.bokontep.wavesynth.WaveDisplay
-                android:id="@+id/osc1WaveDisplay"
-                android:layout_width="match_parent"
-                android:layout_height="50pt"/>
-
-            <TextView
-                android:id="@+id/osc1WaveControlText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Oscillator 1 Wave Control" />
-            <SeekBar
-                android:id="@+id/osc1WaveControlSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="-255"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:id="@+id/osc2WaveText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Oscillator 2 Wave" />
-            <org.bokontep.wavesynth.WaveDisplay
-                android:id="@+id/osc2WaveDisplay"
-                android:layout_width="match_parent"
-                android:layout_height="50pt"/>
-
-            <SeekBar
-                android:id="@+id/osc2WaveSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-
-                android:min="0"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-
-            <TextView
-                android:id="@+id/osc2WaveControlText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Oscillator 2 Wave Control" />
-            <SeekBar
-                android:id="@+id/osc2WaveControlSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="-255"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-                        <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Legacy delay"
-                android:tag="section_collapsed" />
-
-<TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Delay Level" />
-            <SeekBar
-                android:id="@+id/delayLevelSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Delay Time(samples)" />
-            <SeekBar
-                android:id="@+id/delayTimeSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Delay Feedback" />
-            <SeekBar
-                android:id="@+id/delayFeedbackSeekBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:min="0"
-                android:max="255"/>
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="Wavetable bank"
-                android:tag="section_collapsed" />
-
-            <TextView
-                android:id="@+id/customWavetableText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="18sp"
-                android:text="Factory wavetables" />
-
-            <Button
-                android:id="@+id/importWavetableButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Import .vwt wavetable..." />
-
-            <Button
-                android:id="@+id/resetWavetableButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Restore factory bank" />
-
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-                        <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="MIDI devices"
-                android:tag="section_collapsed" />
-
-<TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Select an input midi device"
-                />
-            <Spinner
-                android:id="@+id/spinnerMidiDevice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:entries="@array/senders"
-            />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-
-                />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="20sp"
-                android:text="Select an output midi device"
-                />
-            <Spinner
-                android:id="@+id/spinnerInputMidiDevice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:entries="@array/senders"
-                />
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-                />
-                        <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="RTP-MIDI"
-                android:tag="section_collapsed" />
-
-<TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="24sp"
-                android:text="RTP-MIDI controller (YAWN)" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="16sp"
-                android:text="YAWN host IP address" />
-            <EditText
-                android:id="@+id/rtpMidiHostEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text"
-                android:hint="192.168.1.100" />
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="16sp"
-                android:text="UDP port" />
-            <EditText
-                android:id="@+id/rtpMidiPortEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number"
-                android:text="5004" />
-            <ToggleButton
-                android:id="@+id/rtpMidiToggleButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textOn="RTP-MIDI ON"
-                android:textOff="RTP-MIDI OFF" />
-            <TextView
-                android:id="@+id/rtpMidiStatusText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="16sp"
-                android:text="RTP-MIDI off" />
+                </LinearLayout>
+            </ScrollView>
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/menu"
+            android:layout_width="@dimen/rail_width"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="@dimen/top_bar_height"
+            android:background="@drawable/bg_rail"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="6dp">
 
-    </ScrollView>
-    <LinearLayout
-        android:orientation="vertical"
-        android:id="@+id/menu"
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="0.05"
+            <Button
+                android:id="@+id/toggleSettingsButton"
+                style="@style/Widget.Volna.Transport"
+                android:layout_width="match_parent"
+                android:layout_height="60dp"
+                android:drawableTop="@drawable/ic_settings"
+                android:drawableTint="@color/transport_icon_tint"
+                android:text="SET" />
 
-        >
-        <Button
-            android:id="@+id/toggleSettingsButton"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.2"
-            android:text="SET"
+            <Space
+                android:layout_width="1dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
 
-            />
-        <Button
-            android:id="@+id/recButton"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.2"
-            android:text="REC"
-        />
+            <org.bokontep.wavesynth.LoopMeterView
+                android:id="@+id/loopMeter"
+                android:layout_width="match_parent"
+                android:layout_height="56dp" />
 
-        <Button
-            android:id="@+id/playButton"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.2"
-            android:text="PLAY"
-            />
-        <Button
-            android:id="@+id/clearButton"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.2"
-            android:text="CLEAR"
-            />
-        <Button
-            android:id="@+id/tempoButton"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.2"
-            android:text="TEMPO"
-            />
+            <TextView
+                android:id="@+id/loopClearButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="Clear loop"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.06"
+                android:paddingTop="2dp"
+                android:paddingBottom="4dp"
+                android:text="CLEAR"
+                android:textColor="@color/text_secondary"
+                android:textSize="8sp" />
+
+            <Button
+                android:id="@+id/recButton"
+                style="@style/Widget.Volna.Transport"
+                android:layout_width="match_parent"
+                android:layout_height="60dp"
+                android:drawableTop="@drawable/ic_record"
+                android:text="REC" />
+
+            <Button
+                android:id="@+id/playButton"
+                style="@style/Widget.Volna.Transport"
+                android:layout_width="match_parent"
+                android:layout_height="60dp"
+                android:drawableTop="@drawable/ic_play"
+                android:drawableTint="@color/transport_icon_tint"
+                android:text="PLAY" />
+
+            <Space
+                android:layout_width="1dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+        </LinearLayout>
     </LinearLayout>
-</LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/top_bar_height"
+        android:layout_gravity="top"
+        android:background="@drawable/bg_top_overlay"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/space_m"
+        android:paddingEnd="@dimen/space_m">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:includeFontPadding="false"
+                android:letterSpacing="0.08"
+                android:text="волна"
+                android:textColor="@color/accent"
+                android:textSize="20sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif"
+                android:includeFontPadding="false"
+                android:letterSpacing="0.12"
+                android:text="by bokontep"
+                android:textColor="@color/text_secondary"
+                android:textSize="9sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/performanceInfoText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="monospace"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:paddingStart="12dp"
+            android:text=""
+            android:textColor="@color/accent"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/engineChip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_chip"
+            android:clickable="true"
+            android:focusable="true"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.06"
+            android:maxLines="1"
+            android:paddingStart="10dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="4dp"
+            android:text="YAWN WAVETABLE"
+            android:textColor="@color/text_primary"
+            android:textSize="10sp" />
+
+        <LinearLayout
+            android:id="@+id/scopeModeGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_scope_mode_group"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="2dp">
+
+            <TextView
+                android:id="@+id/scopeModeWave"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_scope_mode"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.06"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp"
+                android:text="WAVE"
+                android:textColor="@color/scope_mode_text"
+                android:textSize="9sp" />
+
+            <TextView
+                android:id="@+id/scopeModeFft"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:background="@drawable/bg_scope_mode"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.06"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp"
+                android:text="FFT"
+                android:textColor="@color/scope_mode_text"
+                android:textSize="9sp" />
+
+            <TextView
+                android:id="@+id/scopeModeBoth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:background="@drawable/bg_scope_mode"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.06"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp"
+                android:text="BOTH"
+                android:textColor="@color/scope_mode_text"
+                android:textSize="9sp" />
+        </LinearLayout>
+
+        <org.bokontep.wavesynth.SensorIndicatorView
+            android:id="@+id/sensorIndicator"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginStart="8dp" />
+
+        <TextView
+            android:id="@+id/dspLoadText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:gravity="end|center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:paddingStart="@dimen/space_m"
+            android:text="DSP   0.0%  pk   0.0%"
+            android:textColor="@color/success"
+            android:textSize="10sp" />
+    </LinearLayout>
+</FrameLayout>

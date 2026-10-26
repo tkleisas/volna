@@ -39,6 +39,10 @@ struct EngineEvent {
         SetAudioEffectBypass,
         SetTempo,
         SetMasterVolume,
+        SetSafetyLimiter,
+        SetPolyphonyLeveling,
+        ClearLoop,
+        SetModSlot,
     };
 
     Type type = Type::NoteOn;

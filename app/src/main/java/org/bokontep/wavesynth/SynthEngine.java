@@ -90,6 +90,14 @@ public class SynthEngine {
     public native int setOctaveFactor(float factor);
     public native int setRecord(boolean flag);
     public native int setPlay(boolean flag);
+    public native int setSafetyLimiter(boolean enabled);
+    public native int setPolyphonyLeveling(boolean enabled);
+    public native float getLoopRecordProgress();
+    public native float getLoopPlayProgress();
+    public native boolean isLoopRecording();
+    public native boolean isLoopPlaying();
+    public native boolean hasLoop();
+    public native int clearLoop();
     public native int setDelayLevel(int level);
     public native int setDelayTime(int time);
     public native int setDelayFeedback(int feedback);
@@ -186,6 +194,10 @@ public class SynthEngine {
     public native int setYawnAudioChainParam(int slot, int index, float value);
 
     public native int setYawnTempo(float bpm);
+    public native int setYawnModSource(int source, float value);
+    public native int setYawnModSlot(int slot, boolean enabled, int source,
+                                     int targetType, int targetSlot,
+                                     int targetParam, float amount);
     public native int setYawnMasterVolume(float volume);
     public native int sendYawnPolyPressure(int channel, int note, int pressure);
     public native int sendYawnChannelPressure(int channel, int pressure);

@@ -29,9 +29,6 @@ float FactoryWaveforms[WTCOUNT * WTLEN];
 float CustomWaveforms[WTCOUNT * WTLEN];
 bool hasCustomBank = false;
 std::mt19937 eng{std::random_device()()};
-float wavedata[256];
-float data[256];
-int index = 0;
 int sr = 0;
 
 void initWaveforms(bool bandlimit, float freq, float q) {
@@ -400,21 +397,18 @@ Java_org_bokontep_wavesynth_SynthEngine_sendMidiNoteSpread(JNIEnv* /* env */,
 extern "C" JNIEXPORT jfloatArray JNICALL
 Java_org_bokontep_wavesynth_SynthEngine_getWaveform(JNIEnv* env,
                                                     jobject /* thiz */) {
-    jfloatArray result = env->NewFloatArray(256);
+    constexpr int kScopeSamples = 1024;
+    jfloatArray result = env->NewFloatArray(kScopeSamples);
     if (result == nullptr) {
         return nullptr;
     }
+    std::vector<float> data(kScopeSamples, 0.0f);
     if (activeYawnEngine() != nullptr) {
-        env->SetFloatArrayRegion(result, 0, 256, gYawnEngine->waveformData());
-        return result;
+        gYawnEngine->copyWaveform(data.data(), kScopeSamples);
+    } else if (engine != nullptr) {
+        engine->copyWaveform(data.data(), kScopeSamples);
     }
-    if (engine == nullptr) {
-        return result;
-    }
-    for (int i = 0; i < 256; i++) {
-        data[i] = engine->getWavedata()[i];
-    }
-    env->SetFloatArrayRegion(result, 0, 256, data);
+    env->SetFloatArrayRegion(result, 0, kScopeSamples, data.data());
     return result;
 }
 
@@ -582,6 +576,93 @@ Java_org_bokontep_wavesynth_SynthEngine_setRecord(JNIEnv* /* env */,
         return -1;
     }
     engine->SetRecord(flag);
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setSafetyLimiter(
+        JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
+    if (activeYawnEngine() != nullptr) {
+        gYawnEngine->setSafetyLimiter(enabled);
+        return 0;
+    }
+    if (engine != nullptr) {
+        engine->setSafetyLimiter(enabled);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setPolyphonyLeveling(
+        JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
+    if (activeYawnEngine() != nullptr) {
+        gYawnEngine->setPolyphonyLeveling(enabled);
+        return 0;
+    }
+    if (engine != nullptr) {
+        engine->setPolyphonyLeveling(enabled);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getLoopRecordProgress(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->loopRecordProgress();
+    }
+    return engine != nullptr ? engine->loopRecordProgress() : 0.0f;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_getLoopPlayProgress(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->loopPlayProgress();
+    }
+    return engine != nullptr ? engine->loopPlayProgress() : 0.0f;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_isLoopRecording(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->isLoopRecording() ? JNI_TRUE : JNI_FALSE;
+    }
+    return engine != nullptr && engine->isLoopRecording()
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_isLoopPlaying(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->isLoopPlaying() ? JNI_TRUE : JNI_FALSE;
+    }
+    return engine != nullptr && engine->isLoopPlaying()
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_hasLoop(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        return gYawnEngine->hasLoop() ? JNI_TRUE : JNI_FALSE;
+    }
+    return engine != nullptr && engine->hasLoop()
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_clearLoop(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (activeYawnEngine() != nullptr) {
+        gYawnEngine->clearLoop();
+        return 0;
+    }
+    if (engine != nullptr) {
+        engine->clearLoop();
+    }
     return 0;
 }
 
@@ -990,6 +1071,27 @@ Java_org_bokontep_wavesynth_SynthEngine_setYawnAudioEffectBypassed(
     JNIEnv* /* env */, jobject /* thiz */, jint effect, jboolean bypassed) {
     if (gYawnEngine != nullptr) {
         gYawnEngine->setAudioEffectBypassed(effect, bypassed == JNI_TRUE);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setYawnModSource(
+        JNIEnv* /* env */, jobject /* thiz */, jint source, jfloat value) {
+    if (gYawnEngine != nullptr) {
+        gYawnEngine->setModSource(source, value);
+    }
+    return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_bokontep_wavesynth_SynthEngine_setYawnModSlot(
+        JNIEnv* /* env */, jobject /* thiz */, jint slot, jboolean enabled,
+        jint source, jint targetType, jint targetSlot, jint targetParam,
+        jfloat amount) {
+    if (gYawnEngine != nullptr) {
+        gYawnEngine->setModSlot(slot, enabled, source, targetType,
+                                targetSlot, targetParam, amount);
     }
     return 0;
 }

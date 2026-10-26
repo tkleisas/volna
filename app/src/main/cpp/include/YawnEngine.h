@@ -12,6 +12,7 @@
 
 #include "EngineEventQueue.h"
 #include "effects/AudioEffect.h"
+#include "effects/Limiter.h"
 #include "instruments/Instrument.h"
 #include "midi/MidiEffect.h"
 #include "midi/MidiTypes.h"
@@ -27,6 +28,8 @@ public:
     static constexpr int kAudioEffectCount = 8;
     static constexpr int kMaxMidiChainSlots = 8;
     static constexpr int kMaxAudioChainSlots = 8;
+    static constexpr int kMaxModSlots = 6;
+    static constexpr int kModSourceCount = 10;
 
     enum class InstrumentKind : int {
         Wavetable = 0,
@@ -154,6 +157,18 @@ public:
 
     void setPlay(bool play);
     void setRecord(bool record);
+    void setSafetyLimiter(bool enabled);
+    void setPolyphonyLeveling(bool enabled);
+    void clearLoop();
+    void setModSource(int source, float value);
+    void setModSlot(int slot, bool enabled, int source, int targetType,
+                    int targetSlot, int targetParam, float amount);
+
+    float loopRecordProgress() const;
+    float loopPlayProgress() const;
+    bool isLoopRecording() const { return mLoopRecording.load(); }
+    bool isLoopPlaying() const { return mLoopPlaying.load(); }
+    bool hasLoop() const { return mLoopRecordLength.load() > 0; }
 
     void setDelayLevel(int level);
     void setDelayTime(int samples);
@@ -165,7 +180,9 @@ public:
     bool hasCustomWavetable() const;
     float* wavetableFrame(float position, float* out, int length) const;
 
+    static constexpr int kWaveformSize = 1024;
     const float* waveformData() const { return mWaveform; }
+    void copyWaveform(float* out, int length) const;
     float dspLoad() const { return mDspLoad.load(std::memory_order_relaxed); }
     float dspPeak() const { return mDspPeak.load(std::memory_order_relaxed); }
     void resetDspPeak() { mDspPeak.store(0.0f, std::memory_order_relaxed); }
@@ -223,6 +240,12 @@ private:
     void handlePitchBend(int channel, int value14);
     void handleControlChange(int channel, int control, int value);
     void handleAllNotesOff();
+    void updateActiveNotes(const yawn::midi::MidiBuffer& buffer);
+    void applyModulation();
+    bool applyModTarget(int type, int slot, int param, float offset,
+                        bool restoreBase);
+    int activeNoteCount() const;
+    void clearActiveNotes();
 
     void doSetPlay(bool play);
     void doSetRecord(bool record);
@@ -252,7 +275,7 @@ private:
     yawn::midi::MidiBuffer mMidiBuffer;
     yawn::midi::TransportInfo mTransport;
     std::vector<float> mMixBuffer;
-    float mWaveform[256] = {};
+    float mWaveform[kWaveformSize] = {};
     int mWaveformIndex = 0;
 
     oboe::ManagedStream mStream;
@@ -266,6 +289,31 @@ private:
     int mSampleRate = 48000;
     int mChannelCount = 2;
     float mMasterVolume = 0.8f;
+    std::atomic<bool> mSafetyLimiter{true};
+    std::atomic<bool> mPolyphonyLeveling{true};
+    yawn::effects::Limiter mSafetyLimiterEffect;
+    float mPolyphonyGain = 1.0f;
+    std::array<std::array<bool, 128>, 16> mActiveNotes{};
+
+    struct ModTarget {
+        int type = -1;
+        int slot = 0;
+        int param = 0;
+    };
+    struct ModSlot {
+        bool enabled = false;
+        int source = 0;
+        int targetType = -1;
+        int targetSlot = 0;
+        int targetParam = 0;
+        float amount = 0.0f;
+    };
+    std::array<std::atomic<float>, kModSourceCount> mModSources{};
+    std::array<float, kModSourceCount> mModSmoothed{};
+    std::array<ModSlot, kMaxModSlots> mModSlots{};
+    std::array<ModTarget, kMaxModSlots> mLastModTargets{};
+    int mLastModTargetCount = 0;
+    float mModSmoothCoeff = 0.0f;
     double mBeatPosition = 0.0;
     double mSamplesPerBeat = 24000.0;
     int64_t mSamplePosition = 0;
@@ -278,7 +326,15 @@ private:
     int mPlayIndex = 0;
     bool mRecording = false;
     bool mPlayingLoop = false;
-    int mFadeSamples = 0;
+    int mCrossfadeSamples = 0;
+    int mPlayFadeSamples = 0;
+    int mPlayFadeRemaining = 0;
+    std::atomic<bool> mLoopRecording{false};
+    std::atomic<bool> mLoopPlaying{false};
+    std::atomic<int> mLoopRecordLength{0};
+    std::atomic<int> mLoopPlayIndex{0};
+    std::atomic<int> mLoopPlayStart{0};
+    std::atomic<int> mLoopPlayEnd{0};
 
     std::mutex mWavetableMutex;
     std::string mWavetablePath;
