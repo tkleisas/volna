@@ -2,6 +2,7 @@ package org.bokontep.wavesynth;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -11,7 +12,7 @@ public class MicrotonalPitchTest {
 
     @Test
     public void tet12ChromaticUsesStandardNotes() {
-        MicrotonalPitchMapper mapper = mapper(60, chromatic(), 12, 440.0, 2.0, 100);
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(12), 12, 440.0, 2.0, 100);
 
         MicrotonalPitchMapper.Pitch atZero = mapper.pitchAt(0, 0);
         assertEquals(60.0, atZero.targetSemitones, EPS);
@@ -33,7 +34,7 @@ public class MicrotonalPitchTest {
 
     @Test
     public void tet24UsesPitchBendInsteadOfRemappedNotes() {
-        MicrotonalPitchMapper mapper = mapper(69, chromatic(), 24, 440.0, 2.0, 100);
+        MicrotonalPitchMapper mapper = mapper(69, chromatic(24), 24, 440.0, 2.0, 100);
 
         MicrotonalPitchMapper.Pitch a4 = mapper.pitchAt(0, 0);
         assertEquals(69.0, a4.targetSemitones, EPS);
@@ -49,7 +50,7 @@ public class MicrotonalPitchTest {
 
     @Test
     public void tet24RootNoteMatchesItsTwelveTetPitch() {
-        MicrotonalPitchMapper mapper = mapper(60, chromatic(), 24, 440.0, 2.0, 100);
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(24), 24, 440.0, 2.0, 100);
         assertEquals(60.0, mapper.pitchAt(0, 0).targetSemitones, 0.01);
     }
 
@@ -73,21 +74,21 @@ public class MicrotonalPitchTest {
 
     @Test
     public void tuneShiftsTheWholeKeyboard() {
-        MicrotonalPitchMapper mapper = mapper(69, chromatic(), 12, 432.0, 2.0, 100);
+        MicrotonalPitchMapper mapper = mapper(69, chromatic(12), 12, 432.0, 2.0, 100);
         double expected = 69.0 + 12.0 * Math.log(432.0 / 440.0) / Math.log(2.0);
         assertEquals(expected, mapper.pitchAt(0, 0).targetSemitones, EPS);
     }
 
     @Test
     public void octaveFactorChangesPitchSpacing() {
-        MicrotonalPitchMapper mapper = mapper(60, chromatic(), 12, 440.0, 1.5, 100);
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(12), 12, 440.0, 1.5, 100);
         double expected = 69.0 + Math.log(1.5) / Math.log(2.0) * (60.0 - 69.0);
         assertEquals(expected, mapper.pitchAt(0, 0).targetSemitones, EPS);
     }
 
     @Test
     public void cellNoteIsAlwaysInMidiRange() {
-        MicrotonalPitchMapper mapper = mapper(60, chromatic(), 24, 440.0, 2.0, 100);
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(24), 24, 440.0, 2.0, 100);
         assertTrue(mapper.pitchAt(0, 0).cellNote >= 0);
         assertTrue(mapper.pitchAt(0, 0).cellNote <= 127);
         assertTrue(mapper.pitchAt(100000, 0).cellNote <= 127);
@@ -95,7 +96,7 @@ public class MicrotonalPitchTest {
 
     @Test
     public void noteChangesAtCellBoundaryNotHalfway() {
-        MicrotonalPitchMapper mapper = mapper(60, chromatic(), 12, 440.0, 2.0, 100);
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(12), 12, 440.0, 2.0, 100);
 
         assertEquals(60, mapper.pitchAt(0, 0).cellNote);
         assertEquals(60, mapper.pitchAt(50, 0).cellNote);
@@ -104,6 +105,69 @@ public class MicrotonalPitchTest {
         assertEquals(61, mapper.pitchAt(150, 0).cellNote);
         assertEquals(61, mapper.pitchAt(199, 0).cellNote);
         assertEquals(62, mapper.pitchAt(200, 0).cellNote);
+    }
+
+    @Test
+    public void tet24MajorUsesScaleDegrees() {
+        int[] major24 = {0, 4, 8, 10, 14, 18, 22};
+        MicrotonalPitchMapper mapper = mapper(60, major24, 24, 440.0, 2.0, 100);
+
+        assertEquals(60.0, mapper.pitchForCell(0, 0), EPS);
+        assertEquals(62.0, mapper.pitchForCell(1, 0), EPS);
+        assertEquals(64.0, mapper.pitchForCell(2, 0), EPS);
+        assertEquals(72.0, mapper.pitchForCell(7, 0), EPS);
+    }
+
+    @Test
+    public void customTet12ScaleUsesItsDegreeSet() {
+        int[] minorPentatonic = {0, 3, 5, 7, 10};
+        MicrotonalPitchMapper mapper = mapper(60, minorPentatonic, 12,
+                440.0, 2.0, 100);
+
+        assertEquals(60.0, mapper.pitchForCell(0, 0), EPS);
+        assertEquals(63.0, mapper.pitchForCell(1, 0), EPS);
+        assertEquals(65.0, mapper.pitchForCell(2, 0), EPS);
+        assertEquals(72.0, mapper.pitchForCell(5, 0), EPS); // next octave
+        assertEquals(61.5, mapper.pitchAt(50, 0).targetSemitones, EPS);
+    }
+
+    @Test
+    public void scaleStepOffsetShiftsByDegreesWithoutChangingTheGrid() {
+        MicrotonalPitchMapper mapper = mapper(60, major(), 12, 440.0, 2.0, 100);
+        MicrotonalPitchMapper.Pitch shifted = mapper.pitchAt(0, 0, 2);
+        assertEquals(2, shifted.cell);
+        assertEquals(64.0, shifted.targetSemitones, EPS);
+
+        MicrotonalPitchMapper.Pitch semitoneShifted = mapper.pitchAt(0, 4);
+        assertEquals(0, semitoneShifted.cell);
+        assertEquals(64.0, semitoneShifted.targetSemitones, EPS);
+    }
+
+    @Test
+    public void constructorRejectsInvalidConfiguration() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new MicrotonalPitchMapper(60, null, 440.0, 2.0, 100));
+        assertThrows(IllegalArgumentException.class,
+                () -> mapper(60, chromatic(12), 0, 440.0, 2.0, 100));
+        assertThrows(IllegalArgumentException.class,
+                () -> mapper(60, chromatic(12), 12, 0.0, 2.0, 100));
+        assertThrows(IllegalArgumentException.class,
+                () -> mapper(60, chromatic(12), 12, 440.0, 0.0, 100));
+        assertThrows(IllegalArgumentException.class,
+                () -> mapper(60, chromatic(12), 12, 440.0, 2.0, 0));
+    }
+
+    @Test
+    public void notesClampToTheMidiRangeAndNegativeCellsInterpolate() {
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(12), 12, 440.0, 2.0, 100);
+        assertEquals(0, MicrotonalPitchMapper.clampNote(-1));
+        assertEquals(127, MicrotonalPitchMapper.clampNote(200));
+
+        MicrotonalPitchMapper.Pitch beforeZero = mapper.pitchAt(-50, 0);
+        assertEquals(-1, beforeZero.cell);
+        assertEquals(0.5, beforeZero.cellFraction, EPS);
+        assertEquals(59, beforeZero.cellNote);
+        assertEquals(59.5, beforeZero.targetSemitones, EPS);
     }
 
     @Test
@@ -158,6 +222,17 @@ public class MicrotonalPitchTest {
     }
 
     @Test
+    public void currentPitchIncludesBendUntilStopped() {
+        MicrotonalVoice voice = new MicrotonalVoice();
+        voice.start(pitch(60.0, 60, 0.0));
+        voice.update(pitch(60.4, 60, 0.4), false);
+        assertEquals(60.4, voice.currentPitch(), EPS);
+
+        voice.update(pitch(61.4, 61, 0.4), false);
+        assertEquals(61.4, voice.currentPitch(), EPS);
+    }
+
+    @Test
     public void stopReleasesCurrentAnchor() {
         MicrotonalVoice voice = new MicrotonalVoice();
         voice.start(pitch(60.0, 60, 0.0));
@@ -182,10 +257,12 @@ public class MicrotonalPitchTest {
         assertEquals(7, allocator.allocate());
     }
 
-    private static MicrotonalPitchMapper mapper(int root, int[] scale, int tet,
+    private static MicrotonalPitchMapper mapper(int root, int[] degrees, int tet,
                                                 double tune, double octave,
                                                 int xNoteScale) {
-        return new MicrotonalPitchMapper(root, scale, tet, tune, octave,
+        ScaleDefinition scale = new ScaleDefinition("test", "test", tet,
+                degrees, false);
+        return new MicrotonalPitchMapper(root, scale, tune, octave,
                 xNoteScale);
     }
 
@@ -194,22 +271,15 @@ public class MicrotonalPitchTest {
         return new MicrotonalPitchMapper.Pitch(target, cellNote, bend, 0, 0.0);
     }
 
-    private static int[] chromatic() {
-        int[] row = new int[13];
-        row[0] = 12;
-        for (int i = 0; i < 12; i++) {
-            row[1 + i] = i;
+    private static int[] chromatic(int tet) {
+        int[] degrees = new int[tet];
+        for (int i = 0; i < tet; i++) {
+            degrees[i] = i;
         }
-        return row;
+        return degrees;
     }
 
     private static int[] major() {
-        int[] row = new int[13];
-        row[0] = 7;
-        int[] degrees = {0, 2, 4, 5, 7, 9, 11};
-        for (int i = 0; i < degrees.length; i++) {
-            row[1 + i] = degrees[i];
-        }
-        return row;
+        return new int[] {0, 2, 4, 5, 7, 9, 11};
     }
 }

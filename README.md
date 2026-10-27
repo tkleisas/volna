@@ -2,7 +2,7 @@
 
 **волна** (pronounced *volna*) means “wave” in Russian. Volna is a landscape,
 multitouch wavetable instrument for Android. It combines a large expressive touch
-surface with three selectable synthesis engines, editable MIDI and audio effect
+surface with four selectable synthesis engines, editable MIDI and audio effect
 chains, microtonal tuning, MPE output, and a Wi-Fi RTP-MIDI bridge to
 [YAWN](https://github.com/tkleisas/yawn).
 
@@ -50,16 +50,20 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
   top strip, so the playing surface reaches the screen edges. The strip carries
   the wordmark, note/scale readout, engine, display mode, and DSP meter.
 - Horizontal position selects notes; the **Pitch bend** slider adds optional
-  microtonal bend and defaults to 0%. Vertical position selects
-  octave/wavetable colour and brightness.
-- Touch X and Touch Y are available as bipolar modulation sources in the MOD
-  matrix; they follow the most recently moved finger.
-- The note grid is drawn edge-to-edge, with cell boundaries and brighter
-  low/mid/high register separators. **Grid size** sets how many pixels of
-  horizontal travel are needed to reach the next note.
+  microtonal bend and defaults to 0%. Vertical position selects a register
+  (1–8, default 3); each register has its own offset and is distinguished by a
+  color plus a subtle hatch pattern.
+- Touch X/Y and Touch ΔX/ΔY are bipolar modulation sources in the MOD matrix;
+  they follow the most recently moved finger.
+- The note grid is drawn edge-to-edge, with cell boundaries and colored
+  register separators. **Grid size** sets how many pixels of horizontal travel
+  are needed to reach the next note.
 - In TET12, note names are drawn inside each register zone and again along the
-  bottom edge of the grid. Labels are hidden when the note cells become too
-  narrow, and they follow the current root, scale, tuning, and register offsets.
+  bottom edge of the grid. Non-TET12 grids show scale-degree numbers. Labels
+  are hidden when cells or zones become too narrow, and they follow the current
+  root, scale, tuning, and register offsets.
+- Active-touch labels use an offset callout chip with a leader line, so the note
+  text is not hidden under the finger.
 - Finger pressure drives note velocity when the touchscreen exposes pressure.
 - The performance display has a stable-trigger waveform with a gradient fill,
   a 64-band log-spaced spectrum overlay, peak caps, and note-name chips for
@@ -72,7 +76,7 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
 
 ## Sound engines
 
-Three engines can be selected at runtime.
+Four engines can be selected at runtime.
 
 ### Volna Classic
 
@@ -101,9 +105,17 @@ Three engines can be selected at runtime.
 - LP/BP/HP state-variable filter with envelope and resonance.
 - Amp ADSR, filter ADSR, LFO, and master volume.
 
+### YAWN Karplus-Strong
+
+- YAWN’s physical-modelling plucked/struck string synthesizer.
+- Noise, bright-noise, saw, and sine exciters.
+- Damping, brightness, decay, body resonance, and inharmonic string stretch.
+- Attack and volume controls with 16-voice polyphony.
+- Per-note pitch bend and the modulation matrix pitch destination are supported.
+
 The selected YAWN instrument and its full parameter set are persisted across
-launches. Both YAWN instrument banks are saved, so switching between Wavetable
-and Subtractive does not lose the other instrument’s settings.
+launches. All YAWN instrument banks are saved, so switching among Wavetable,
+Subtractive, and Karplus-Strong does not lose another instrument’s settings.
 
 ## Effect chains
 
@@ -163,14 +175,18 @@ notes without detuning. Raise it to restore microtonal pitch and glissando. At
 Supported controls:
 
 - **Root note** from C0 to B6.
-- **Scales**: chromatic, major, natural/harmonic/melodic minor, acoustic,
-  major2, minor2, pentatonic, blues, Chinese pentatonic, whole tone, whole-half,
-  and half-whole.
+- **Scales**: the TET12 built-ins plus user-defined TET12 scales created from a
+  12-note editor. TET24 starts with quarter-tone chromatic, major, natural
+  minor, neutral pentatonic, and 24-TET Rast/Bayati approximations. Other TETs
+  fall back to chromatic.
 - **A4 tuning**: 400–500 Hz.
-- **TET**: 2–48 equal divisions of the octave. TET applies to both YAWN engines.
+- **TET**: 2–48 equal divisions of the octave. TET applies to all YAWN engines.
 - **Octave factor**: 1.5–2.5, allowing stretched or compressed octaves.
-- **Register offsets**: independent low/middle/high note offsets for the three
-  vertical zones of the touch surface.
+- **Registers**: 1–8 vertical zones with independent offsets. Register 1 is the
+  bottom (lowest-pitch) zone and higher registers move upward in pitch. The unit
+  can be semitones or scale steps. Presets include Octaves, Power, Major, Minor, and a
+  standard-guitar string layout (`0/+5/+10/+15/+19/+24` semitones) for reusing
+  guitar chord shapes with a chromatic grid.
 
 Gesture model:
 
@@ -303,7 +319,8 @@ playing while editing. The panel has six tabs, each with collapsible cards:
 - **Sound**: engine selector, YAWN instrument parameters, tempo/master, classic
   oscillator, and wavetable bank.
 - **FX**: editable MIDI and audio effect chains plus the legacy delay.
-- **Tune**: TET, root, scale, A4, octave factor, and register offsets.
+- **Tune**: TET, root, scale editor, A4, octave factor, pitch bend, register
+  count, offset unit/preset, and per-register offsets.
 - **I/O**: Android MIDI devices and RTP-MIDI host/port/status.
 - **MOD**: the sensor modulation matrix.
 
@@ -317,11 +334,11 @@ accent-tinted sliders, compact toggles, and larger touch targets.
 Persisted state:
 
 - Engine selection, YAWN instrument, tempo, master volume.
-- Both YAWN instrument parameter banks.
+- All YAWN instrument parameter banks.
 - Every MIDI/audio effect chain: composition, order, bypass, and parameters.
-- Tuning, scale, root, register offsets, grid size, legato, pitch bend, red
-  phosphor, scope display mode, selected settings tab, output limiter, and
-  polyphony leveling.
+- Tuning, built-in/custom scale selection, root, register count/unit/offsets,
+  grid size, legato, pitch bend, red phosphor, scope display mode, selected
+  settings tab, output limiter, and polyphony leveling.
 - Imported wavetable bytes and display name.
 - RTP-MIDI host/port/enabled state.
 - Modulation matrix rows, sources, targets, amounts, and enable states.
@@ -395,7 +412,7 @@ C++ engine (NDK)
   ├─ EngineEventQueue (multi-producer, lock-free audio consumer)
   ├─ YawnEngine
   │   ├─ MIDI effect chain
-  │   ├─ Wavetable / Subtractive instrument
+  │   ├─ Wavetable / Subtractive / Karplus-Strong instrument
   │   ├─ audio effect chain
   │   ├─ loop recorder
   │   └─ JSON state save/restore
@@ -423,6 +440,9 @@ app/src/main/java/org/bokontep/wavesynth/
   VwtWavetable.java          .vwt parser and 256-slot mapper
   WavetableStore.java        imported wavetable persistence
   MicrotonalPitchMapper.java continuous pitch + note/bend split
+  ScaleDefinition.java       TET-aware scale definition
+  ScaleStore.java            built-in and custom scale persistence
+  RegisterLayout.java        configurable register count/units/offsets
   MicrotonalVoice.java       hybrid anchor/re-anchor gesture state
   TouchExpression.java       pressure/velocity curve
   RtpMidiClient.java         RTP-MIDI sender
@@ -441,6 +461,7 @@ app/src/main/cpp/
 app/src/test/                JVM unit tests
 scripts/sync_yawn_dsp.sh     refresh vendored YAWN DSP
 scripts/check_16kb_page_size.sh  release APK/AAB page-size verification
+native-tests/               host-compiled YAWN DSP tests
 .github/workflows/android.yml CI build, tests, and signed releases
 ```
 
@@ -459,6 +480,7 @@ cd volna
 ./gradlew :app:assembleDebug
 ./gradlew :app:testDebugUnitTest
 ./gradlew :app:lintDebug
+./native-tests/run.sh
 ```
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
@@ -480,11 +502,21 @@ alignment, and attaches both files to the GitHub release.
 
 ## Testing and CI
 
-- JVM unit tests cover `.vwt` parsing/mapping, microtonal pitch splitting,
-  hybrid gesture transitions, pressure curves, RTP-MIDI packet layout, and the
-  spectrum/FFT analyzer.
-- Native YAWN tests cover per-note pitch bend, MPE translation, and RTP-MIDI
-  parsing.
+The project follows test-driven development; the workflow and commands are
+documented in [AGENTS.md](./AGENTS.md). New behavior and bug fixes should start
+with a focused failing test.
+
+- JVM unit tests cover `.vwt` parsing/mapping, microtonal pitch splitting and
+  cell boundaries, hybrid gesture transitions, touch-relative modulation,
+  pressure curves, RTP-MIDI packet layout, and the spectrum/FFT analyzer.
+- Robolectric UI tests cover preferences/wavetable persistence, custom view
+  state, main-layout inflation, and modulation-matrix source/target interaction.
+- Native C++ tests cover MIDI conversion, MIDI pitch transpose/flush, scale
+  quantization, pitch-modulation note tracking, envelopes, and the YAWN
+  Wavetable, Subtractive, and Karplus-Strong engines via
+  `native-tests/run.sh`.
+- Scale, register-layout, persistence, and pitch-mapping tests cover the custom
+  scale and configurable-register behavior.
 - GitHub Actions runs unit tests, lint, and the debug build on every push and
   pull request. Tagged builds also produce signed APK/AAB release assets and
   verify 16 KB page-size compatibility.

@@ -656,6 +656,12 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
 
+                    <Button
+                        android:id="@+id/editScaleButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Edit scale" />
+
                     <TextView
                         android:id="@+id/tuneText"
                         android:layout_width="match_parent"
@@ -696,40 +702,49 @@
                         android:min="0" />
 
                     <TextView
+                        style="@style/Widget.Volna.SectionHeader"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Low register note offset" />
+                        android:tag="section:tune"
+                        android:text="Registers" />
 
-                    <EditText
-                        android:id="@+id/lowOffsetEditText"
+                    <TextView
+                        android:id="@+id/registerCountText"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:inputType="number"
-                        android:text="0" />
+                        android:text="Registers: 3" />
+
+                    <SeekBar
+                        android:id="@+id/registerCountSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="7" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Middle register note offset" />
+                        android:text="Offset unit" />
 
-                    <EditText
-                        android:id="@+id/middleOffsetEditText"
+                    <Spinner
+                        android:id="@+id/registerUnitSpinner"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="number"
-                        android:text="12" />
+                        android:layout_height="wrap_content" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="High register note offset" />
+                        android:text="Register preset" />
 
-                    <EditText
-                        android:id="@+id/highOffsetEditText"
+                    <Spinner
+                        android:id="@+id/registerPresetSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <LinearLayout
+                        android:id="@+id/registerControls"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:inputType="number"
-                        android:text="24" />
+                        android:orientation="vertical" />
 
                     <TextView
                         style="@style/Widget.Volna.SectionHeader"
@@ -954,8 +969,8 @@
         android:layout_height="@dimen/top_bar_height"
         android:layout_gravity="top"
         android:background="@drawable/bg_top_overlay"
-        android:clickable="true"
-        android:focusable="true"
+        android:clickable="false"
+        android:focusable="false"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="@dimen/space_m"

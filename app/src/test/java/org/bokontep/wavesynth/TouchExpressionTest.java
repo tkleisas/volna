@@ -33,6 +33,22 @@ public class TouchExpressionTest {
     }
 
     @Test
+    public void continuousInputsClampAtTheMidiLimits() {
+        assertEquals(1, TouchExpression.velocity(0.0f));
+        assertEquals(127, TouchExpression.velocity(2.0f));
+        assertEquals(0, TouchExpression.midiPressure(0.0f));
+        assertEquals(127, TouchExpression.midiPressure(2.0f));
+    }
+
+    @Test
+    public void nonFiniteInputIsTreatedAsUnsupported() {
+        assertFalse(TouchExpression.isSupported(Float.NaN));
+        assertEquals(TouchExpression.UNSUPPORTED_VELOCITY,
+                TouchExpression.velocity(Float.NaN));
+        assertEquals(-1, TouchExpression.midiPressure(Float.NaN));
+    }
+
+    @Test
     public void smoothingFollowsInputWithoutOvershoot() {
         assertEquals(0.5f, TouchExpression.smooth(0.5f, -1.0f), 0.0f);
         assertEquals(0.65f, TouchExpression.smooth(0.5f, 1.0f), 0.0001f);

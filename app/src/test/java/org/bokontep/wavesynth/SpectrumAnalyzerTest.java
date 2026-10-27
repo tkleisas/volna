@@ -1,6 +1,7 @@
 package org.bokontep.wavesynth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -30,6 +31,30 @@ public class SpectrumAnalyzerTest {
         }
         float frequency = SpectrumAnalyzer.frequencyForBar(best, SAMPLE_RATE);
         assertEquals(1000.0f, frequency, 150.0f);
+    }
+
+    @Test
+    public void analyzeRequiresAFullBarBuffer() {
+        SpectrumAnalyzer analyzer = new SpectrumAnalyzer();
+        float[] samples = new float[1024];
+        assertThrows(IllegalArgumentException.class,
+                () -> analyzer.analyze(samples, SAMPLE_RATE, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> analyzer.analyze(samples, SAMPLE_RATE,
+                        new float[SpectrumAnalyzer.BAR_COUNT - 1]));
+    }
+
+    @Test
+    public void invalidSampleRateFallsBackAndNyquistIsClamped() {
+        SpectrumAnalyzer analyzer = new SpectrumAnalyzer();
+        float[] bars = new float[SpectrumAnalyzer.BAR_COUNT];
+        analyzer.analyze(new float[1024], 0, bars);
+        for (float bar : bars) {
+            assertTrue(bar >= 0.0f && bar <= 1.0f);
+        }
+        assertTrue(SpectrumAnalyzer.frequencyForBar(
+                SpectrumAnalyzer.BAR_COUNT - 1, 8000) <= 4000.0f);
+        assertTrue(SpectrumAnalyzer.frequencyForBar(0, 8000) >= 30.0f);
     }
 
     @Test

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "EngineEventQueue.h"
+#include "PitchModulation.h"
 #include "effects/AudioEffect.h"
 #include "effects/Limiter.h"
 #include "instruments/Instrument.h"
@@ -18,23 +19,23 @@
 #include "midi/MidiTypes.h"
 
 // A compact instrument host built from YAWN's DSP modules:
-//   MIDI effects -> wavetable/subtractive instrument -> audio effects -> loop recorder
+//   MIDI effects -> wavetable/subtractive/Karplus instrument -> audio effects -> loop recorder
 class YawnEngine : public oboe::AudioStreamCallback {
 public:
     static constexpr int kMaxFrames = 4096;
     static constexpr int kMaxParams = 64;
-    static constexpr int kInstrumentCount = 2;
+    static constexpr int kInstrumentCount = 3;
     static constexpr int kMidiEffectCount = 8;
     static constexpr int kAudioEffectCount = 8;
     static constexpr int kMaxMidiChainSlots = 8;
     static constexpr int kMaxAudioChainSlots = 8;
     static constexpr int kMaxModSlots = 6;
     static constexpr int kModSourceCount = 14;
-    static constexpr float kPitchModRangeSemitones = 12.0f;
 
     enum class InstrumentKind : int {
         Wavetable = 0,
         Subtractive = 1,
+        Karplus = 2,
     };
 
     YawnEngine();
@@ -243,7 +244,6 @@ private:
     void handleAllNotesOff();
     void updateActiveNotes(const yawn::midi::MidiBuffer& buffer);
     void applyModulation();
-    void setPitchModulation(float semitones);
     void sendPerNotePitch(int channel, int note, float semitones);
     bool applyModTarget(int type, int slot, int param, float offset,
                         bool restoreBase);
@@ -297,9 +297,7 @@ private:
     yawn::effects::Limiter mSafetyLimiterEffect;
     float mPolyphonyGain = 1.0f;
     std::array<std::array<bool, 128>, 16> mActiveNotes{};
-    std::array<std::array<float, 128>, 16> mActiveNoteBends{};
-    float mPitchModSemitones = 0.0f;
-    bool mPitchModDirty = false;
+    volna::PitchModulation mPitchModulation;
 
     struct ModTarget {
         int type = -1;

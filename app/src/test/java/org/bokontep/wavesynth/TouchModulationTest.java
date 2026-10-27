@@ -37,6 +37,20 @@ public class TouchModulationTest {
     }
 
     @Test
+    public void normalizedPositionsClampOutsideTheSurface() {
+        assertEquals(-1.0f, TouchModulation.normalizedX(-100.0f, 200.0f), EPS);
+        assertEquals(1.0f, TouchModulation.normalizedX(300.0f, 200.0f), EPS);
+        assertEquals(1.0f, TouchModulation.normalizedY(-100.0f, 200.0f), EPS);
+        assertEquals(-1.0f, TouchModulation.normalizedY(300.0f, 200.0f), EPS);
+    }
+
+    @Test
+    public void relativePositionUsesHalfSurfaceTravel() {
+        assertEquals(0.5f, TouchModulation.relativeX(150.0f, 100.0f, 200.0f), EPS);
+        assertEquals(-0.5f, TouchModulation.relativeY(150.0f, 100.0f, 200.0f), EPS);
+    }
+
+    @Test
     public void pitchBendIsZeroByDefaultAndClamped() {
         assertEquals(0.0, TouchModulation.scaledBend(0.5, 0.0f), 0.0001);
         assertEquals(0.25, TouchModulation.scaledBend(0.5, 0.5f), 0.0001);

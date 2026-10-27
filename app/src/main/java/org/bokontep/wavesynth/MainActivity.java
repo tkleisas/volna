@@ -1,5 +1,6 @@
 package org.bokontep.wavesynth;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 
@@ -57,25 +58,6 @@ import java.util.Locale;
 public class MainActivity extends AppCompatActivity {
     static final String TAG = "Volna";
 
-    private int[] scales =
-            {
-                    12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, // chromatic
-                    7, 0, 2, 4, 5, 7, 9, 11, 0, 0, 0, 0, 0, // major
-                    7, 0, 2, 3, 5, 7, 8, 10, 0, 0, 0, 0, 0, // natural minor
-                    7, 0, 2, 3, 5, 7, 8, 11, 0, 0, 0, 0, 0, // harmonic minor
-                    7, 0, 2, 3, 5, 7, 9, 11, 0, 0, 0, 0, 0, // ascending melodic minor
-                    8, 0, 2, 4, 6, 7, 9, 10, 11, 0, 0, 0, 0, // acoustic
-                    10, 0, 1, 2, 4, 5, 7, 8, 9, 10, 11, 0, 0, // major2
-                    8, 0, 1, 4, 5, 7, 8, 10, 11, 0, 0, 0, 0, // minor2
-                    5, 0, 3, 5, 7, 10, 0, 0, 0, 0, 0, 0, 0, // pentatonic
-                    6, 0, 3, 5, 6, 7, 10, 0, 0, 0, 0, 0, 0, // blues
-                    5, 0, 2, 5, 7, 9, 0, 0, 0, 0, 0, 0, 0, // chinese pentatonic
-                    6, 0, 2, 4, 6, 8, 10, 0, 0, 0, 0, 0, 0, // whole tone
-                    8, 0, 2, 3, 5, 6, 8, 9, 11, 0, 0, 0, 0, // whole half
-                    8, 0, 1, 3, 4, 6, 7, 9, 10, 0, 0, 0, 0  // half whole
-
-
-            };
     private long lastTouchEventTime = 0;
 
 
@@ -97,9 +79,6 @@ public class MainActivity extends AppCompatActivity {
     private int delayFeedback = 0;
     private int tet = 12;
 
-    private int lowOffset = 0;
-    private int midOffset = 12;
-    private int highOffset = 24;
     private float tune = 440.0f;
     private float octaveFactor = 2.0f;
     private float pitchBendAmount = 0.0f;
@@ -113,9 +92,6 @@ public class MainActivity extends AppCompatActivity {
     private Handler mHandler;
     private Runnable screenUpdater;
     private Scope scope;
-    private EditText lowOffsetEditText;
-    private EditText midOffsetEditText;
-    private EditText highOffsetEditText;
 
     private WavetableStore wavetableStore;
     private TextView customWavetableText;
@@ -165,6 +141,19 @@ public class MainActivity extends AppCompatActivity {
     private ToggleButton safetyLimiterToggle;
     private ToggleButton polyphonyLevelingToggle;
     private Spinner scaleSpinner;
+    private Button editScaleButton;
+    private ScaleStore scaleStore;
+    private ScaleDefinition currentScaleDefinition;
+    private String currentScaleId = "";
+    private final List<ScaleDefinition> scaleOptions = new ArrayList<>();
+    private RegisterLayout registerLayout;
+    private SeekBar registerCountSeekBar;
+    private TextView registerCountText;
+    private Spinner registerUnitSpinner;
+    private Spinner registerPresetSpinner;
+    private LinearLayout registerControls;
+    private boolean updatingScaleSpinner;
+    private boolean updatingRegisterUi;
     private boolean legato = true;
     private boolean safetyLimiter = true;
     private boolean polyphonyLeveling = true;
@@ -225,7 +214,6 @@ public class MainActivity extends AppCompatActivity {
     private View menuView;
     private int rootNote = 36;
     private int xNoteScale = 160;
-    private int currentScale = 0;
     private MicrotonalPitchMapper pitchMapper;
     private MpeChannelAllocator mpeChannelAllocator;
     private final SparseArray<TouchVoice> touchVoices = new SparseArray<>();
@@ -253,25 +241,6 @@ public class MainActivity extends AppCompatActivity {
                     "C6(72)", "C#6(73)", "D6(74)", "D#6(75)", "E6(76)", "F6(77)", "F#6(78)", "G6(79)", "G#6(80)", "A6(81)", "A#6(82)", "B6(83)"
 
             };
-    private String[] scaleNames =
-            {
-                    "chromatic",
-                    "major",
-                    "natural minor",
-                    "harmonic minor",
-                    "ascending melodic minor",
-                    "acoustic",
-                    "major2",
-                    "minor2",
-                    "pentatonic",
-                    "blues",
-                    "chinese pentatonic",
-                    "whole tone",
-                    "whole half",
-                    "half whole"
-            };
-
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -284,9 +253,7 @@ public class MainActivity extends AppCompatActivity {
         prefs = new AppPreferences(this);
         engine = new SynthEngine(this, 44100);
         wavetableStore = new WavetableStore(this);
-        lowOffset = prefs.readInt("lowOffset",0);
-        midOffset = prefs.readInt("midOffset",12);
-        highOffset = prefs.readInt("highOffset",24);
+        scaleStore = new ScaleStore(prefs);
         delayLevel = prefs.readInt("delayLevel",0);
         delayTime = prefs.readInt("delayTime",0);
         delayFeedback = prefs.readInt("delayFeedback",0);
@@ -313,7 +280,19 @@ public class MainActivity extends AppCompatActivity {
 
         rootNote = prefs.readInt("rootNote", 35);
         xNoteScale = prefs.readInt("xNoteScale", 160);
-        currentScale = prefs.readInt("currentScale", 0);
+        currentScaleId = prefs.readString("currentScaleId", "");
+        if (currentScaleId.isEmpty()) {
+            int legacyScale = prefs.readInt("currentScale", 0);
+            if (tet == 12 && legacyScale >= 0 && legacyScale < 14) {
+                currentScaleId = scaleStore.scalesForTet(12)
+                        .get(legacyScale).id;
+            }
+        }
+        currentScaleDefinition = scaleStore.find(currentScaleId, tet);
+        currentScaleId = currentScaleDefinition.id;
+        prefs.writeString("currentScaleId", currentScaleId);
+        registerLayout = RegisterLayout.fromPreferences(
+                prefs, currentScaleDefinition.size());
         maxSpread = prefs.readInt("maxSpread", 0);
         osc1Wave = prefs.readInt("osc1Wave", 0);
         osc2Wave = prefs.readInt("osc2Wave", 0);
@@ -353,7 +332,8 @@ public class MainActivity extends AppCompatActivity {
         final String[] engineNames = {
                 "Volna Classic",
                 "YAWN Wavetable",
-                "YAWN Subtractive"
+                "YAWN Subtractive",
+                "YAWN Karplus-Strong"
         };
         engineSpinner.setAdapter(spinnerAdapter(engineNames));
         engineChip = findViewById(R.id.engineChip);
@@ -458,16 +438,8 @@ public class MainActivity extends AppCompatActivity {
         scope.setRed(red);
         setupPerformanceTouch();
         setupScopeModeControls();
-        scope.setNoteLabelProvider((cell, zone) -> {
-            if (tet != 12 || pitchMapper == null) {
-                return null;
-            }
-            int offset = zone == 0 ? lowOffset
-                    : (zone == 1 ? midOffset : highOffset);
-            int note = MicrotonalPitchMapper.clampNote(
-                    (int) Math.round(pitchMapper.pitchForCell(cell, offset)));
-            return noteName(note);
-        });
+        scope.setNoteLabelProvider((cell, zone) -> labelForCell(cell, zone));
+        scope.setRegisterCount(registerLayout.count());
         updateScopeText();
         rootNoteSpinner = (Spinner) findViewById(R.id.rootNoteSpinner);
         final ArrayAdapter<String> rootNoteAdapter = spinnerAdapter(rootNotes);
@@ -490,28 +462,9 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-        final ArrayAdapter<String> scaleAdapter = spinnerAdapter(scaleNames);
-        scaleSpinner = (Spinner) findViewById(R.id.scaleSpinner);
-        scaleSpinner.setAdapter(scaleAdapter);
-
-        scaleSpinner.setOnItemSelectedListener(
-                new AdapterView.OnItemSelectedListener() {
-
-                    @Override
-                    public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                        if (position >= 0 && position < scaleAdapter.getCount()) {
-                            currentScale = position;
-                            prefs.writeInt("currentScale", currentScale);
-                            updatePitchMapper();
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(AdapterView<?> parent) {
-                        return;
-                    }
-                });
-        scaleSpinner.setSelection(currentScale);
+        setupScaleSpinner();
+        setupRegisterControls();
+        scope.setRegisterCount(registerLayout.count());
         this.tetSeekBar = (SeekBar) findViewById(R.id.tetSeekBar);
         this.tetSeekBar.setProgress(tet);
         this.tetTextView = (TextView) findViewById(R.id.tetText);
@@ -617,97 +570,6 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.resetWavetableButton).setOnClickListener(
                 v -> restoreFactoryWavetable("Factory wavetables restored"));
         restoreSavedWavetable();
-        this.lowOffsetEditText = (EditText) findViewById(R.id.lowOffsetEditText);
-        this.midOffsetEditText = (EditText) findViewById(R.id.middleOffsetEditText);
-        this.highOffsetEditText = (EditText) findViewById(R.id.highOffsetEditText);
-        this.lowOffsetEditText.addTextChangedListener(
-                new TextWatcher() {
-                    @Override
-                    public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-
-                    }
-
-                    @Override
-                    public void onTextChanged(CharSequence s, int start, int before, int count) {
-
-                    }
-
-                    @Override
-                    public void afterTextChanged(Editable s) {
-                        try {
-                            lowOffset = Integer.parseInt(lowOffsetEditText.getText().toString(),10);
-                            if(lowOffset<0 || lowOffset>2*tet)
-                            {
-                                lowOffset = 0;
-                            }
-                            prefs.writeInt("lowOffset",lowOffset);
-                            updatePitchMapper();
-                        }
-                        catch (Exception e)
-                        {
-                            lowOffset = 0;
-                        }
-                    }
-                }
-        );
-        this.midOffsetEditText.addTextChangedListener(
-                new TextWatcher() {
-                    @Override
-                    public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-
-                    }
-
-                    @Override
-                    public void onTextChanged(CharSequence s, int start, int before, int count) {
-
-                    }
-
-                    @Override
-                    public void afterTextChanged(Editable s) {
-                        try {
-                            midOffset = Integer.parseInt(midOffsetEditText.getText().toString(),10);
-                            if(midOffset<0 || midOffset>2*tet)
-                            {
-                                midOffset = 0;
-                            }
-                            prefs.writeInt("midOffset",midOffset);
-                            updatePitchMapper();
-                        }
-                        catch (Exception e)
-                        {
-                            midOffset = 0;
-                        }
-                    }
-                }
-        );
-        this.highOffsetEditText.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-                try {
-                    highOffset = Integer.parseInt(highOffsetEditText.getText().toString(),10);
-                    if(highOffset<0 || highOffset>2*tet)
-                    {
-                        highOffset = 0;
-                    }
-                    prefs.writeInt("highOffset",highOffset);
-                    updatePitchMapper();
-                }
-                catch (Exception e)
-                {
-                    highOffset = 0;
-                }
-            }
-        });
         //this.osc2WaveDisplay.invalidate();
         SeekBar.OnSeekBarChangeListener onSeekBarChangeListener = new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -726,7 +588,12 @@ public class MainActivity extends AppCompatActivity {
                     engine.setTet(tet);
                     tetTextView.setText("TET: " + tet);
                     prefs.writeInt("tet", tet);
+                    rebuildScaleSpinner();
+                    registerLayout.ensureDegreeDefaults(
+                            currentScaleDefinition.size());
                     updatePitchMapper();
+                    refreshRegisterUi();
+                    updateScopeText();
                 } else if (id == R.id.octaveFactorSeekBar) {
                     octaveFactor = ((float)progress) / 1000.0f;
                     octaveFactorTextView.setText(String.format(Locale.US, "Octave factor: %.2f", octaveFactor));
@@ -1183,11 +1050,385 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void setupScaleSpinner() {
+        scaleSpinner = (Spinner) findViewById(R.id.scaleSpinner);
+        editScaleButton = (Button) findViewById(R.id.editScaleButton);
+        editScaleButton.setOnClickListener(v -> showScaleEditor());
+        scaleSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view,
+                                       int position, long id) {
+                if (updatingScaleSpinner || position < 0
+                        || position >= scaleOptions.size()) {
+                    return;
+                }
+                currentScaleDefinition = scaleOptions.get(position);
+                currentScaleId = currentScaleDefinition.id;
+                prefs.writeString("currentScaleId", currentScaleId);
+                registerLayout.ensureDegreeDefaults(
+                        currentScaleDefinition.size());
+                updatePitchMapper();
+                refreshRegisterUi();
+                updateScopeText();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        rebuildScaleSpinner();
+    }
+
+    private void rebuildScaleSpinner() {
+        if (scaleSpinner == null || scaleStore == null) {
+            return;
+        }
+        scaleOptions.clear();
+        scaleOptions.addAll(scaleStore.scalesForTet(tet));
+        int selected = 0;
+        for (int i = 0; i < scaleOptions.size(); i++) {
+            if (scaleOptions.get(i).id.equals(currentScaleId)) {
+                selected = i;
+                break;
+            }
+        }
+        String[] names = new String[scaleOptions.size()];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = scaleOptions.get(i).name;
+        }
+        updatingScaleSpinner = true;
+        ArrayAdapter<String> adapter = spinnerAdapter(names);
+        scaleSpinner.setAdapter(adapter);
+        scaleSpinner.setSelection(selected, false);
+        currentScaleDefinition = scaleOptions.get(selected);
+        currentScaleId = currentScaleDefinition.id;
+        prefs.writeString("currentScaleId", currentScaleId);
+        updatingScaleSpinner = false;
+        if (editScaleButton != null) {
+            boolean enabled = tet == 12;
+            editScaleButton.setEnabled(enabled);
+            editScaleButton.setAlpha(enabled ? 1.0f : 0.4f);
+        }
+    }
+
+    private void showScaleEditor() {
+        if (tet != 12 || currentScaleDefinition == null) {
+            Toast.makeText(this, "Custom scales are available for TET 12",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final boolean custom = !currentScaleDefinition.builtIn;
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = dp(16);
+        content.setPadding(padding, padding, padding, padding);
+
+        final EditText nameInput = new EditText(this);
+        nameInput.setHint("Scale name");
+        nameInput.setSingleLine(true);
+        nameInput.setText(custom ? currentScaleDefinition.name
+                : "Copy of " + currentScaleDefinition.name);
+        content.addView(nameInput);
+
+        final boolean[] selected = new boolean[12];
+        for (int degree : currentScaleDefinition.degrees) {
+            if (degree >= 0 && degree < 12) {
+                selected[degree] = true;
+            }
+        }
+        selected[0] = true;
+        final ToggleButton[] buttons = new ToggleButton[12];
+        for (int row = 0; row < 3; row++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            for (int col = 0; col < 4; col++) {
+                final int degree = row * 4 + col;
+                ToggleButton button = new ToggleButton(this);
+                String noteLabel = noteName(MicrotonalPitchMapper.clampNote(
+                        rootNote + degree));
+                button.setTextOn(noteLabel);
+                button.setTextOff(noteLabel);
+                button.setText(noteLabel);
+                button.setTextSize(10);
+                button.setChecked(selected[degree]);
+                button.setEnabled(degree != 0);
+                button.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+                button.setOnCheckedChangeListener((b, checked) ->
+                        selected[degree] = checked || degree == 0);
+                buttons[degree] = button;
+                line.addView(button);
+            }
+            content.addView(line);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(custom ? "Edit TET12 scale" : "New TET12 scale")
+                .setView(content)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    selected[0] = true;
+                    int count = 0;
+                    for (boolean value : selected) {
+                        if (value) count++;
+                    }
+                    int[] degrees = new int[count];
+                    int index = 0;
+                    for (int i = 0; i < selected.length; i++) {
+                        if (selected[i]) degrees[index++] = i;
+                    }
+                    String name = nameInput.getText().toString().trim();
+                    if (name.isEmpty()) name = "Custom scale";
+                    ScaleDefinition saved = scaleStore.saveCustom(
+                            custom ? currentScaleDefinition.id : null,
+                            name, degrees);
+                    currentScaleId = saved.id;
+                    rebuildScaleSpinner();
+                    registerLayout.ensureDegreeDefaults(
+                            currentScaleDefinition.size());
+                    updatePitchMapper();
+                    refreshRegisterUi();
+                    updateScopeText();
+                })
+                .setNegativeButton("Cancel", null);
+        if (custom) {
+            builder.setNeutralButton("Delete", (dialog, which) -> {
+                scaleStore.deleteCustom(currentScaleDefinition.id);
+                currentScaleId = "";
+                rebuildScaleSpinner();
+                updatePitchMapper();
+                refreshRegisterRows();
+                updateScopeText();
+            });
+        }
+        builder.show();
+    }
+
+    private String labelForCell(int cell, int zone) {
+        if (pitchMapper == null || currentScaleDefinition == null
+                || zone < 0 || zone >= registerLayout.count()) {
+            return null;
+        }
+        int register = registerLayout.count() - 1 - zone;
+        if (tet == 12) {
+            double pitch = pitchForCell(cell, register);
+            return noteName(MicrotonalPitchMapper.clampNote(
+                    (int) Math.round(pitch)));
+        }
+        int degreeOffset = registerLayout.unit()
+                == RegisterLayout.UNIT_SCALE_STEPS
+                ? registerLayout.getDegreeOffset(register) : 0;
+        int degree = Math.floorMod(cell + degreeOffset,
+                currentScaleDefinition.size());
+        return String.valueOf(degree + 1);
+    }
+
+    private double pitchForCell(int cell, int zone) {
+        if (registerLayout.unit() == RegisterLayout.UNIT_SEMITONES) {
+            return pitchMapper.pitchForCell(cell,
+                    registerLayout.getSemitoneOffset(zone));
+        }
+        return pitchMapper.pitchForCell(cell + registerLayout.getDegreeOffset(zone),
+                0);
+    }
+
+    private MicrotonalPitchMapper.Pitch pitchForTouch(float x, int zone) {
+        if (registerLayout.unit() == RegisterLayout.UNIT_SEMITONES) {
+            return pitchMapper.pitchAt(x, registerLayout.getSemitoneOffset(zone));
+        }
+        return pitchMapper.pitchAt(x, 0, registerLayout.getDegreeOffset(zone));
+    }
+
+    private void setupRegisterControls() {
+        registerCountSeekBar = (SeekBar) findViewById(R.id.registerCountSeekBar);
+        registerCountText = (TextView) findViewById(R.id.registerCountText);
+        registerUnitSpinner = (Spinner) findViewById(R.id.registerUnitSpinner);
+        registerPresetSpinner = (Spinner) findViewById(R.id.registerPresetSpinner);
+        registerControls = (LinearLayout) findViewById(R.id.registerControls);
+        if (registerCountSeekBar == null || registerControls == null) {
+            return;
+        }
+        registerCountSeekBar.setMax(RegisterLayout.MAX_REGISTERS - 1);
+        registerCountSeekBar.setProgress(registerLayout.count() - 1);
+        registerCountSeekBar.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                    @Override
+                    public void onProgressChanged(SeekBar seekBar, int progress,
+                                                  boolean fromUser) {
+                        if (!fromUser) return;
+                        registerLayout.setCount(progress + 1);
+                        registerLayout.save(prefs);
+                        refreshRegisterUi();
+                    }
+
+                    @Override
+                    public void onStartTrackingTouch(SeekBar seekBar) {
+                    }
+
+                    @Override
+                    public void onStopTrackingTouch(SeekBar seekBar) {
+                    }
+                });
+
+        registerUnitSpinner.setAdapter(spinnerAdapter(
+                new String[] {"Semitones", "Scale steps"}));
+        registerUnitSpinner.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(AdapterView<?> parent, View view,
+                                               int position, long id) {
+                        if (updatingRegisterUi) return;
+                        registerLayout.setUnit(position == 1
+                                        ? RegisterLayout.UNIT_SCALE_STEPS
+                                        : RegisterLayout.UNIT_SEMITONES,
+                                currentScaleDefinition.size());
+                        registerLayout.save(prefs);
+                        refreshRegisterRows();
+                        if (scope != null) scope.invalidateNoteLabels();
+                        updateScopeText();
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {
+                    }
+                });
+
+        registerPresetSpinner.setAdapter(spinnerAdapter(
+                new String[] {"Custom", "Octaves", "Power", "Major",
+                        "Minor", "Guitar strings"}));
+        registerPresetSpinner.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(AdapterView<?> parent, View view,
+                                               int position, long id) {
+                        if (updatingRegisterUi || position == 0) return;
+                        registerLayout.applyPreset(position,
+                                currentScaleDefinition.size());
+                        registerLayout.save(prefs);
+                        refreshRegisterUi();
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {
+                    }
+                });
+        refreshRegisterUi();
+    }
+
+    private void refreshRegisterUi() {
+        if (registerControls == null) {
+            return;
+        }
+        updatingRegisterUi = true;
+        registerCountSeekBar.setProgress(registerLayout.count() - 1);
+        registerCountText.setText("Registers: " + registerLayout.count());
+        registerUnitSpinner.setSelection(registerLayout.unit(), false);
+        registerPresetSpinner.setSelection(registerLayout.preset(), false);
+        updatingRegisterUi = false;
+        refreshRegisterRows();
+        if (scope != null) {
+            scope.setRegisterCount(registerLayout.count());
+            scope.invalidateNoteLabels();
+        }
+        updateScopeText();
+    }
+
+    private void refreshRegisterRows() {
+        if (registerControls == null) {
+            return;
+        }
+        updatingRegisterUi = true;
+        registerControls.removeAllViews();
+        for (int i = registerLayout.count() - 1; i >= 0; i--) {
+            final int register = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(6), dp(4), dp(6), dp(4));
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowParams.bottomMargin = dp(4);
+            row.setLayoutParams(rowParams);
+            row.setBackgroundResource(R.drawable.bg_input);
+
+            View swatch = new View(this);
+            LinearLayout.LayoutParams swatchParams = new LinearLayout.LayoutParams(
+                    dp(12), dp(26));
+            swatchParams.setMarginEnd(dp(8));
+            swatch.setLayoutParams(swatchParams);
+            swatch.setBackgroundColor(RegisterLayout.colorFor(i));
+            row.addView(swatch);
+
+            TextView label = new TextView(this);
+            label.setText("R" + (i + 1));
+            label.setTextSize(11);
+            label.setTextColor(getColor(R.color.text_primary));
+            label.setTypeface(Typeface.MONOSPACE);
+            label.setLayoutParams(new LinearLayout.LayoutParams(dp(38),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            row.addView(label);
+
+            Button minus = registerStepButton("−");
+            minus.setOnClickListener(v -> {
+                registerLayout.setOffset(register,
+                        registerLayout.getOffset(register) - 1);
+                registerLayout.save(prefs);
+                refreshRegisterUi();
+                if (scope != null) scope.invalidateNoteLabels();
+            });
+            row.addView(minus);
+
+            TextView value = new TextView(this);
+            value.setText(registerOffsetLabel(i));
+            value.setTextSize(12);
+            value.setTypeface(Typeface.MONOSPACE);
+            value.setTextColor(getColor(R.color.accent));
+            value.setGravity(Gravity.CENTER);
+            value.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+            row.addView(value);
+
+            Button plus = registerStepButton("+");
+            plus.setOnClickListener(v -> {
+                registerLayout.setOffset(register,
+                        registerLayout.getOffset(register) + 1);
+                registerLayout.save(prefs);
+                refreshRegisterUi();
+                if (scope != null) scope.invalidateNoteLabels();
+            });
+            row.addView(plus);
+            registerControls.addView(row);
+        }
+        updatingRegisterUi = false;
+    }
+
+    private String registerOffsetLabel(int register) {
+        int value = registerLayout.getOffset(register);
+        String suffix = registerLayout.unit() == RegisterLayout.UNIT_SEMITONES
+                ? " st" : " steps";
+        return (value >= 0 ? "+" : "") + value + suffix;
+    }
+
+    private Button registerStepButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(12);
+        button.setTextColor(getColorStateList(R.color.button_text_selector));
+        button.setBackgroundResource(R.drawable.bg_button_secondary);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(dp(34));
+        button.setMinimumHeight(dp(34));
+        button.setPadding(dp(8), 0, dp(8), 0);
+        return button;
+    }
+
     private void updatePitchMapper() {
-        int[] scaleRow = new int[13];
-        System.arraycopy(scales, currentScale * 13, scaleRow, 0, 13);
-        pitchMapper = new MicrotonalPitchMapper(rootNote, scaleRow, tet, tune,
-                octaveFactor, xNoteScale);
+        if (currentScaleDefinition == null) {
+            return;
+        }
+        pitchMapper = new MicrotonalPitchMapper(rootNote,
+                currentScaleDefinition, tune, octaveFactor, xNoteScale);
         if (scope != null) {
             scope.invalidateNoteLabels();
         }
@@ -1307,16 +1548,6 @@ public class MainActivity extends AppCompatActivity {
         updateScopeText();
     }
 
-    private int zoneOffset(float y, float height) {
-        if (y > 2.0f * height / 3.0f) {
-            return lowOffset;
-        }
-        if (y < height / 3.0f) {
-            return highOffset;
-        }
-        return midOffset;
-    }
-
     private void startTouch(MotionEvent event, int index, float height) {
         final int id = event.getPointerId(index);
         if (touchVoices.get(id) != null) {
@@ -1327,10 +1558,11 @@ public class MainActivity extends AppCompatActivity {
         final float expression = rawTouchExpression(event, index);
         final int velocity = velocityForExpression(expression);
         final int channel = mpeChannelAllocator.allocate();
-        final MicrotonalPitchMapper.Pitch pitch =
-                pitchMapper.pitchAt(x, zoneOffset(y, height));
+        final int register = registerLayout.registerAt(y, height);
+        final MicrotonalPitchMapper.Pitch pitch = pitchForTouch(x, register);
 
         TouchVoice voice = new TouchVoice(id, channel);
+        voice.register = register;
         voice.velocity = velocity;
         voice.pressure = expression >= 0.0f ? expression : 0.5f;
         int[] waveforms = waveformsForTouch(y, height);
@@ -1352,7 +1584,7 @@ public class MainActivity extends AppCompatActivity {
         selectWaveformForVoice(voice);
         publishTouchModulation(voice, x, y);
         scope.setMarker("" + id, x, y, noteName(transition.noteOn)
-                + " " + velocity);
+                + " " + velocity, register);
         vel = velocity;
     }
 
@@ -1362,8 +1594,9 @@ public class MainActivity extends AppCompatActivity {
         final float y = event.getY(index);
         final float expression = rawTouchExpression(event, index);
         final int velocity = velocityForExpression(expression);
-        final MicrotonalPitchMapper.Pitch pitch =
-                pitchMapper.pitchAt(x, zoneOffset(y, height));
+        final int register = registerLayout.registerAt(y, height);
+        final MicrotonalPitchMapper.Pitch pitch = pitchForTouch(x, register);
+        voice.register = register;
         final MicrotonalVoice.Transition transition =
                 voice.expression.update(pitch,
                         legato && pitchBendAmount > 0.001f);
@@ -1399,7 +1632,7 @@ public class MainActivity extends AppCompatActivity {
         int displayNote = Math.max(0, Math.min(127,
                 (int) Math.round(playedPitch)));
         scope.setMarker("" + voice.pointerId, x, y,
-                noteName(displayNote) + " " + velocity);
+                noteName(displayNote) + " " + velocity, register);
         vel = velocity;
     }
 
@@ -1519,9 +1752,10 @@ public class MainActivity extends AppCompatActivity {
         StringBuilder text = new StringBuilder();
         if (tet == 12) {
             text.append(rootNoteStr).append(' ')
-                    .append(scaleNames[currentScale]);
+                    .append(currentScaleDefinition.name);
         } else {
-            text.append("TET ").append(tet);
+            text.append("TET ").append(tet).append(' ')
+                    .append(currentScaleDefinition.name);
         }
         for (int i = 0; i < touchVoices.size(); i++) {
             TouchVoice voice = touchVoices.valueAt(i);
@@ -1561,6 +1795,7 @@ public class MainActivity extends AppCompatActivity {
         int waveform2;
         int anchorNote;
         int lastSpread;
+        int register;
         float startX;
         float startY;
         float lastX;

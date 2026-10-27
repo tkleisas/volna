@@ -118,6 +118,77 @@ public class VwtWavetableTest {
     }
 
     @Test
+    public void rejectsEmptyInput() {
+        assertThrows(VwtWavetable.FormatException.class,
+                () -> VwtWavetable.parse(null));
+        assertThrows(VwtWavetable.FormatException.class,
+                () -> VwtWavetable.parse(new byte[0]));
+    }
+
+    @Test
+    public void acceptsUtf8Bom() throws Exception {
+        byte[] encoded = makeVwt(2, 4,
+                new float[][] {constantFrame(4, 0.5f)}, null, "bom");
+        byte[] withBom = new byte[encoded.length + 3];
+        withBom[0] = (byte) 0xEF;
+        withBom[1] = (byte) 0xBB;
+        withBom[2] = (byte) 0xBF;
+        System.arraycopy(encoded, 0, withBom, 3, encoded.length);
+
+        VwtWavetable table = VwtWavetable.parse(withBom);
+        assertEquals("bom", table.name);
+    }
+
+    @Test
+    public void fallsBackForMissingNameAndClampsSampleRate() throws Exception {
+        JSONObject root = new JSONObject(new String(
+                makeVwt(2, 4, new float[][] {constantFrame(4, 0.5f)},
+                        null, "unused"), StandardCharsets.UTF_8));
+        root.put("name", "x".repeat(200));
+        root.put("sampleRate", 1000);
+
+        VwtWavetable table = VwtWavetable.parse(
+                root.toString().getBytes(StandardCharsets.UTF_8));
+        assertEquals(120, table.name.length());
+        assertEquals(8000, table.sampleRate);
+
+        root.put("name", "   ");
+        root.put("sampleRate", 500000);
+        VwtWavetable defaulted = VwtWavetable.parse(
+                root.toString().getBytes(StandardCharsets.UTF_8));
+        assertEquals("Imported wavetable", defaulted.name);
+        assertEquals(192000, defaulted.sampleRate);
+    }
+
+    @Test
+    public void rejectsUnsupportedVersionAndMissingData() throws Exception {
+        JSONObject root = new JSONObject(new String(
+                makeVwt(2, 4, new float[][] {constantFrame(4, 0.0f)},
+                        null, "version"), StandardCharsets.UTF_8));
+        root.put("version", 3);
+        assertThrows(VwtWavetable.FormatException.class,
+                () -> VwtWavetable.parse(
+                        root.toString().getBytes(StandardCharsets.UTF_8)));
+
+        root.put("version", 2);
+        root.remove("data");
+        assertThrows(VwtWavetable.FormatException.class,
+                () -> VwtWavetable.parse(
+                        root.toString().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    public void rejectsInvalidBankDimensions() throws Exception {
+        VwtWavetable table = VwtWavetable.parse(
+                makeVwt(2, 4, new float[][] {constantFrame(4, 0.0f)},
+                        null, "bank"));
+        assertThrows(IllegalArgumentException.class,
+                () -> table.toVolnaBank(0, 8, 0.0f));
+        assertThrows(IllegalArgumentException.class,
+                () -> table.toVolnaBank(4, 0, 0.0f));
+    }
+
+    @Test
     public void rejectsWrongFormat() throws Exception {
         JSONObject root = validRoot(4, 1, constantFrame(4, 0.0f));
         root.put("format", "something-else");

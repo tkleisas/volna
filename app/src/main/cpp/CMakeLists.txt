@@ -35,6 +35,7 @@ add_library( # Sets the name of the library.
 add_library(yawn_dsp STATIC
         yawn_dsp/src/instruments/WavetableSynth.cpp
         yawn_dsp/src/instruments/SubtractiveSynth.cpp
+        yawn_dsp/src/instruments/KarplusStrong.cpp
         yawn_dsp/src/effects/Delay.cpp
         yawn_dsp/src/effects/Chorus.cpp
         yawn_dsp/src/effects/Reverb.cpp

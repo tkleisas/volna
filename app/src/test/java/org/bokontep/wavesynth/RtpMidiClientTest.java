@@ -1,6 +1,7 @@
 package org.bokontep.wavesynth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -8,8 +9,33 @@ import org.junit.Test;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class RtpMidiClientTest {
+    @Test
+    public void rejectsBlankHostAndInvalidPort() {
+        AtomicReference<String> error = new AtomicReference<>();
+        RtpMidiClient client = new RtpMidiClient();
+        assertFalse(client.start("", 5004,
+                (message, isError) -> error.set(message + ":" + isError)));
+        assertTrue(error.get().contains("host"));
+
+        error.set(null);
+        assertFalse(client.start("127.0.0.1", 0,
+                (message, isError) -> error.set(message + ":" + isError)));
+        assertTrue(error.get().contains("port"));
+        assertFalse(client.isRunning());
+    }
+
+    @Test
+    public void sendBeforeStartAndRepeatedStopAreSafe() {
+        RtpMidiClient client = new RtpMidiClient();
+        client.send(new byte[] {(byte) 0x90, 60, 100}, 3);
+        client.stop();
+        client.stop();
+        assertFalse(client.isRunning());
+    }
+
     @Test
     public void sendsRtpMidiPacket() throws Exception {
         try (DatagramSocket receiver = new DatagramSocket(0)) {

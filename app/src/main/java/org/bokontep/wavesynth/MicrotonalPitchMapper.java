@@ -12,24 +12,24 @@ public final class MicrotonalPitchMapper {
     private static final double LOG2 = Math.log(2.0);
 
     private final int rootNote;
-    private final int[] scale;
+    private final ScaleDefinition scale;
     private final int tet;
     private final double tune;
     private final double octaveFactor;
     private final int xNoteScale;
 
-    public MicrotonalPitchMapper(int rootNote, int[] scaleRow, int tet,
+    public MicrotonalPitchMapper(int rootNote, ScaleDefinition scale,
                                  double tune, double octaveFactor,
                                  int xNoteScale) {
-        if (scaleRow == null || scaleRow.length < 13 || scaleRow[0] <= 0) {
-            throw new IllegalArgumentException("Invalid scale row");
+        if (scale == null) {
+            throw new IllegalArgumentException("Invalid scale");
         }
-        if (tet <= 0 || xNoteScale <= 0 || tune <= 0.0 || octaveFactor <= 0.0) {
+        if (xNoteScale <= 0 || tune <= 0.0 || octaveFactor <= 0.0) {
             throw new IllegalArgumentException("Invalid tuning parameters");
         }
         this.rootNote = rootNote;
-        this.scale = scaleRow.clone();
-        this.tet = tet;
+        this.scale = scale;
+        this.tet = scale.tet;
         this.tune = tune;
         this.octaveFactor = octaveFactor;
         this.xNoteScale = xNoteScale;
@@ -53,36 +53,32 @@ public final class MicrotonalPitchMapper {
     }
 
     public Pitch pitchAt(float x, int offsetSemitones) {
+        return pitchAt(x, offsetSemitones, 0);
+    }
+
+    public Pitch pitchAt(float x, int offsetSemitones, int cellOffset) {
         final double cellPosition = (double) x / xNoteScale;
         final int cell = (int) Math.floor(cellPosition);
         final double fraction = cellPosition - cell;
-        final double first = pitchForCell(cell, offsetSemitones);
-        final double next = pitchForCell(cell + 1, offsetSemitones);
+        final int effectiveCell = cell + cellOffset;
+        final double first = pitchForCell(effectiveCell, offsetSemitones);
+        final double next = pitchForCell(effectiveCell + 1, offsetSemitones);
         final double target = first + (next - first) * fraction;
         // The note anchor follows the visible cell, so it changes only when
         // the touch centre crosses a vertical grid line.
         final int cellNote = clampNote((int) Math.round(first));
-        return new Pitch(target, cellNote, target - cellNote, cell, fraction);
+        return new Pitch(target, cellNote, target - cellNote, effectiveCell,
+                fraction);
     }
 
     public double pitchForCell(int cell, int offsetSemitones) {
-        if (tet == 12) {
-            final int notesInScale = scale[0];
-            final int scaleSteps = (int) Math.round(
-                    offsetSemitones * notesInScale / 12.0);
-            final int relative = cell + scaleSteps;
-            final int octave = Math.floorDiv(relative, notesInScale);
-            final int degree = Math.floorMod(relative, notesInScale);
-            final int note = rootNote + octave * 12 + scale[1 + degree];
-            return 69.0 + Math.log(octaveFactor) / LOG2 * (note - 69.0) +
-                    tuneOffset();
-        }
-
-        // TET != 12: rootNote is a normal MIDI note, so convert it to the
-        // equivalent step in the current equal division of the octave.
+        final int notesInScale = scale.size();
+        final int octave = Math.floorDiv(cell, notesInScale);
+        final int degree = Math.floorMod(cell, notesInScale);
         final double a4Step = 5.75 * tet;
         final double rootStep = a4Step + (rootNote - 69.0) * tet / 12.0;
-        final double step = rootStep + cell + offsetSemitones * tet / 12.0;
+        final double step = rootStep + scale.degrees[degree]
+                + octave * tet + offsetSemitones * tet / 12.0;
         final double frequency = Math.pow(octaveFactor,
                 (step - a4Step) / tet) * tune;
         return 69.0 + 12.0 * Math.log(frequency / 440.0) / LOG2;

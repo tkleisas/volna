@@ -4,10 +4,11 @@ import android.content.Context;
 import android.media.AudioManager;
 import android.os.Build;
 
-public class SynthEngine {
+public class SynthEngine implements ModMatrixEngine {
     public static final int ENGINE_LEGACY = 0;
     public static final int ENGINE_YAWN_WAVETABLE = 1;
     public static final int ENGINE_YAWN_SUBTRACTIVE = 2;
+    public static final int ENGINE_YAWN_KARPLUS = 3;
 
     static {
         System.loadLibrary("wavesynth-lib");

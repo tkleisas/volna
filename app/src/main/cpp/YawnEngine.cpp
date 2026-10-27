@@ -13,6 +13,7 @@
 #include "effects/Filter.h"
 #include "effects/Limiter.h"
 #include "effects/Reverb.h"
+#include "instruments/KarplusStrong.h"
 #include "instruments/SubtractiveSynth.h"
 #include "instruments/WavetableSynth.h"
 #include "midi/Arpeggiator.h"
@@ -47,6 +48,7 @@ float clampParam(const yawn::ParameterInfo& info, float value) {
 YawnEngine::YawnEngine() {
     mMetadataInstruments[0] = std::make_unique<yawn::instruments::WavetableSynth>();
     mMetadataInstruments[1] = std::make_unique<yawn::instruments::SubtractiveSynth>();
+    mMetadataInstruments[2] = std::make_unique<yawn::instruments::KarplusStrong>();
 
     mMidiCatalog[0] = std::make_unique<yawn::midi::Arpeggiator>();
     mMidiCatalog[1] = std::make_unique<yawn::midi::Chord>();
@@ -248,6 +250,8 @@ void YawnEngine::resumeAudio() {
 std::unique_ptr<yawn::instruments::Instrument> YawnEngine::createInstrument(
     int index) const {
     switch (index) {
+        case static_cast<int>(InstrumentKind::Karplus):
+            return std::make_unique<yawn::instruments::KarplusStrong>();
         case static_cast<int>(InstrumentKind::Subtractive):
             return std::make_unique<yawn::instruments::SubtractiveSynth>();
         case static_cast<int>(InstrumentKind::Wavetable):
@@ -417,13 +421,14 @@ bool YawnEngine::selectInstrument(int index) {
 }
 
 const char* YawnEngine::instrumentName(int index) {
-    static const char* kNames[] = {"YAWN Wavetable", "YAWN Subtractive"};
+    static const char* kNames[] = {"YAWN Wavetable", "YAWN Subtractive",
+                                   "YAWN Karplus-Strong"};
     if (index < 0 || index >= kInstrumentCount) return "";
     return kNames[index];
 }
 
 const char* YawnEngine::instrumentId(int index) {
-    static const char* kIds[] = {"wavetable", "subsynth"};
+    static const char* kIds[] = {"wavetable", "subsynth", "karplus"};
     if (index < 0 || index >= kInstrumentCount) return "";
     return kIds[index];
 }
@@ -1282,7 +1287,8 @@ void YawnEngine::selectWaveform(int /* channel */, int osc, int /* note */,
     if (mInstrumentIndex == static_cast<int>(InstrumentKind::Wavetable)) {
         setInstrumentParam(yawn::instruments::WavetableSynth::kPosition,
                            normalized);
-    } else {
+    } else if (mInstrumentIndex ==
+               static_cast<int>(InstrumentKind::Subtractive)) {
         if (osc == 0) {
             setInstrumentParam(yawn::instruments::SubtractiveSynth::kFilterCutoff,
                                normalized);
@@ -1296,7 +1302,8 @@ void YawnEngine::noteSpread(int /* channel */, int /* note */, int spread) {
     if (mInstrumentIndex == static_cast<int>(InstrumentKind::Wavetable)) {
         setInstrumentParam(yawn::instruments::WavetableSynth::kUnisonDetune,
                            std::abs(amount));
-    } else {
+    } else if (mInstrumentIndex ==
+               static_cast<int>(InstrumentKind::Subtractive)) {
         setInstrumentParam(yawn::instruments::SubtractiveSynth::kOsc2Detune,
                            amount);
     }
@@ -1441,9 +1448,9 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
         case EngineEvent::Type::NotePitch: {
             const int channel = event.channel & 15;
             const int note = event.a & 127;
-            mActiveNoteBends[channel][note] = event.f;
+            mPitchModulation.setBaseBend(channel, note, event.f);
             sendPerNotePitch(channel, note,
-                             event.f + mPitchModSemitones);
+                             event.f + mPitchModulation.offsetSemitones());
             break;
         }
         case EngineEvent::Type::NoteTransition:
@@ -1466,7 +1473,8 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
                     setInstrumentParam(
                         yawn::instruments::WavetableSynth::kPosition,
                         static_cast<float>(event.b) / 127.0f);
-                } else {
+                } else if (mInstrumentIndex ==
+                           static_cast<int>(InstrumentKind::Subtractive)) {
                     setInstrumentParam(
                         yawn::instruments::SubtractiveSynth::kFilterCutoff,
                         static_cast<float>(event.b) / 127.0f);
@@ -1497,14 +1505,23 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
             selectWaveform(0, 1, 0, event.a);
             break;
         case EngineEvent::Type::SetAdsr: {
-            const int base = mInstrumentIndex ==
-                                     static_cast<int>(InstrumentKind::Wavetable)
-                                 ? yawn::instruments::WavetableSynth::kAmpAttack
-                                 : yawn::instruments::SubtractiveSynth::kAmpAttack;
-            setInstrumentParam(base + 0, ccToSeconds(event.a));
-            setInstrumentParam(base + 1, ccToSeconds(event.b));
-            setInstrumentParam(base + 2, ccToUnit(event.c));
-            setInstrumentParam(base + 3, ccToSeconds(event.d));
+            if (mInstrumentIndex ==
+                    static_cast<int>(InstrumentKind::Wavetable)) {
+                const int base =
+                    yawn::instruments::WavetableSynth::kAmpAttack;
+                setInstrumentParam(base + 0, ccToSeconds(event.a));
+                setInstrumentParam(base + 1, ccToSeconds(event.b));
+                setInstrumentParam(base + 2, ccToUnit(event.c));
+                setInstrumentParam(base + 3, ccToSeconds(event.d));
+            } else if (mInstrumentIndex ==
+                       static_cast<int>(InstrumentKind::Subtractive)) {
+                const int base =
+                    yawn::instruments::SubtractiveSynth::kAmpAttack;
+                setInstrumentParam(base + 0, ccToSeconds(event.a));
+                setInstrumentParam(base + 1, ccToSeconds(event.b));
+                setInstrumentParam(base + 2, ccToUnit(event.c));
+                setInstrumentParam(base + 3, ccToSeconds(event.d));
+            }
             break;
         }
         case EngineEvent::Type::SetInstrumentParam:
@@ -1624,18 +1641,13 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
 }
 
 void YawnEngine::handleNoteOn(int channel, int note, int velocity) {
-    const int safeChannel = channel & 15;
-    const int safeNote = note & 127;
-    mActiveNoteBends[safeChannel][safeNote] = 0.0f;
+    mPitchModulation.noteOn(channel & 15, note & 127);
     mMidiBuffer.addMessage(
         yawn::midi::MidiMessage::noteOn(channel, note, velocity));
-    if (std::abs(mPitchModSemitones) > 0.0001f) {
-        mPitchModDirty = true;
-    }
 }
 
 void YawnEngine::handleNoteOff(int channel, int note) {
-    mActiveNoteBends[channel & 15][note & 127] = 0.0f;
+    mPitchModulation.noteOff(channel & 15, note & 127);
     mMidiBuffer.addMessage(yawn::midi::MidiMessage::noteOff(channel, note));
 }
 
@@ -1651,19 +1663,21 @@ void YawnEngine::handleControlChange(int channel, int control, int value) {
     if (!mInstrument) return;
     const bool isWavetable =
         mInstrumentIndex == static_cast<int>(InstrumentKind::Wavetable);
+    const bool isSubtractive =
+        mInstrumentIndex == static_cast<int>(InstrumentKind::Subtractive);
     switch (control) {
         case 16:
             if (isWavetable) {
                 setInstrumentParam(yawn::instruments::WavetableSynth::kPosition,
                                    static_cast<float>(value) / 255.0f);
-            } else {
+            } else if (isSubtractive) {
                 setInstrumentParam(
                     yawn::instruments::SubtractiveSynth::kOsc1Wave,
                     std::round((static_cast<float>(value) / 255.0f) * 4.0f));
             }
             break;
         case 17:
-            if (!isWavetable) {
+            if (isSubtractive) {
                 setInstrumentParam(
                     yawn::instruments::SubtractiveSynth::kOsc2Wave,
                     std::round((static_cast<float>(value) / 255.0f) * 4.0f));
@@ -1673,6 +1687,7 @@ void YawnEngine::handleControlChange(int channel, int control, int value) {
         case 19:
         case 20:
         case 21: {
+            if (!isWavetable && !isSubtractive) break;
             const int param = isWavetable
                                   ? yawn::instruments::WavetableSynth::kAmpAttack +
                                         (control - 18)
@@ -1690,6 +1705,7 @@ void YawnEngine::handleControlChange(int channel, int control, int value) {
         case 23:
         case 24:
         case 25: {
+            if (!isWavetable && !isSubtractive) break;
             const int param = isWavetable
                                   ? yawn::instruments::WavetableSynth::kFiltAttack +
                                         (control - 22)
@@ -1707,7 +1723,7 @@ void YawnEngine::handleControlChange(int channel, int control, int value) {
             if (isWavetable) {
                 setInstrumentParam(yawn::instruments::WavetableSynth::kLFOAmount,
                                    ccToUnit(value));
-            } else {
+            } else if (isSubtractive) {
                 setInstrumentParam(yawn::instruments::SubtractiveSynth::kLFODepth,
                                    ccToUnit(value));
             }
@@ -1716,7 +1732,7 @@ void YawnEngine::handleControlChange(int channel, int control, int value) {
             if (isWavetable) {
                 setInstrumentParam(yawn::instruments::WavetableSynth::kPosition,
                                    ccToUnit(value));
-            } else {
+            } else if (isSubtractive) {
                 setInstrumentParam(
                     yawn::instruments::SubtractiveSynth::kFilterCutoff,
                     ccToUnit(value));
@@ -1839,10 +1855,7 @@ void YawnEngine::clearActiveNotes() {
     for (auto& channel : mActiveNotes) {
         channel.fill(false);
     }
-    for (auto& channel : mActiveNoteBends) {
-        channel.fill(0.0f);
-    }
-    mPitchModDirty = false;
+    mPitchModulation.resetNotes();
 }
 
 void YawnEngine::updateActiveNotes(
@@ -1852,9 +1865,14 @@ void YawnEngine::updateActiveNotes(
         const int note = msg.note & 127;
         if (msg.type == yawn::midi::MidiMessage::Type::NoteOn) {
             mActiveNotes[channel][note] = msg.velocity > 0;
+            if (msg.velocity > 0) {
+                mPitchModulation.markActive(channel, note);
+            } else {
+                mPitchModulation.noteOff(channel, note);
+            }
         } else if (msg.type == yawn::midi::MidiMessage::Type::NoteOff) {
             mActiveNotes[channel][note] = false;
-            mActiveNoteBends[channel][note] = 0.0f;
+            mPitchModulation.noteOff(channel, note);
         } else if (msg.type == yawn::midi::MidiMessage::Type::ControlChange
                 && (msg.ccNumber == 120 || msg.ccNumber == 123)) {
             clearActiveNotes();
@@ -1877,14 +1895,6 @@ void YawnEngine::sendPerNotePitch(int channel, int note, float semitones) {
         semitones / static_cast<float>(MicrotonalBendRange), -1.0f, 1.0f);
     mMidiBuffer.addMessage(yawn::midi::MidiMessage::perNotePitchBend(
         channel, note, yawn::midi::Convert::floatToPb32(normalized)));
-}
-
-void YawnEngine::setPitchModulation(float semitones) {
-    if (std::abs(semitones - mPitchModSemitones) < 0.001f) {
-        return;
-    }
-    mPitchModSemitones = semitones;
-    mPitchModDirty = true;
 }
 
 bool YawnEngine::applyModTarget(int type, int slot, int param, float offset,
@@ -2000,7 +2010,7 @@ void YawnEngine::applyModulation() {
     }
     mLastModTargets = current;
     mLastModTargetCount = count;
-    setPitchModulation(pitchOffset * kPitchModRangeSemitones);
+    mPitchModulation.setNormalizedOffset(pitchOffset);
 }
 
 void YawnEngine::copyWaveform(float* out, int length) const {
@@ -2049,17 +2059,21 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         float* right = mMixBuffer.data() + 1;
 
         updateActiveNotes(mMidiBuffer);
-        if (mPitchModDirty) {
-            for (int pitchChannel = 0; pitchChannel < 16; ++pitchChannel) {
-                for (int pitchNote = 0; pitchNote < 128; ++pitchNote) {
-                    if (mActiveNotes[pitchChannel][pitchNote]) {
-                        sendPerNotePitch(pitchChannel, pitchNote,
-                                mActiveNoteBends[pitchChannel][pitchNote] +
-                                        mPitchModSemitones);
-                    }
-                }
+        if (mPitchModulation.consumeDirty()) {
+            int pitchChannels[volna::PitchModulation::kChannels
+                              * volna::PitchModulation::kNotes];
+            int pitchNotes[volna::PitchModulation::kChannels
+                           * volna::PitchModulation::kNotes];
+            float pitchSemitones[volna::PitchModulation::kChannels
+                                 * volna::PitchModulation::kNotes];
+            const int updates = mPitchModulation.collectUpdates(
+                    pitchChannels, pitchNotes, pitchSemitones,
+                    volna::PitchModulation::kChannels
+                            * volna::PitchModulation::kNotes);
+            for (int i = 0; i < updates; ++i) {
+                sendPerNotePitch(pitchChannels[i], pitchNotes[i],
+                                 pitchSemitones[i]);
             }
-            mPitchModDirty = false;
         }
         const int active = std::clamp(activeNoteCount(), 0, 16);
         const int effectiveVoices = std::max(1, active);

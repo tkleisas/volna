@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.util.AttributeSet;
@@ -30,6 +31,8 @@ public class Scope extends View {
     private final float[] markerY = new float[10];
     private final String[] markerLabels = new String[10];
     private final boolean[] markerActive = new boolean[10];
+    private final int[] markerRegisters = new int[10];
+    private int registerCount = 3;
 
     private final Paint tracePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -45,9 +48,14 @@ public class Scope extends View {
     private final Paint markerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint markerFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint markerTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint registerFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint registerLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint markerChipPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint markerChipBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final Path tracePath = new Path();
     private final Path fillPath = new Path();
+    private final RectF markerChipRect = new RectF();
     private int width;
     private int height;
     private float density;
@@ -61,6 +69,7 @@ public class Scope extends View {
     private int cachedLabelVersion = -1;
     private int cachedLabelWidth = -1;
     private int cachedLabelScale = -1;
+    private int cachedRegisterCount = -1;
     private String[] bottomLabels;
     private String[][] zoneLabels;
 
@@ -123,6 +132,13 @@ public class Scope extends View {
         markerTextPaint.setTypeface(Typeface.MONOSPACE);
         markerTextPaint.setTextSize(dp(9.0f));
         markerTextPaint.setAntiAlias(true);
+
+        registerFillPaint.setStyle(Paint.Style.FILL);
+        registerLinePaint.setStyle(Paint.Style.STROKE);
+        registerLinePaint.setStrokeWidth(dp(0.8f));
+        markerChipPaint.setStyle(Paint.Style.FILL);
+        markerChipBorderPaint.setStyle(Paint.Style.STROKE);
+        markerChipBorderPaint.setStrokeWidth(dp(1.0f));
 
         applyAccent();
     }
@@ -220,7 +236,21 @@ public class Scope extends View {
         }
     }
 
+    public void setRegisterCount(int count) {
+        int clamped = Math.max(1, Math.min(RegisterLayout.MAX_REGISTERS, count));
+        if (registerCount != clamped) {
+            registerCount = clamped;
+            invalidateNoteLabels();
+            invalidate();
+        }
+    }
+
     public void setMarker(String id, float x, float y, String label) {
+        setMarker(id, x, y, label, 0);
+    }
+
+    public void setMarker(String id, float x, float y, String label,
+                          int register) {
         int slot = markerSlot(id);
         if (slot < 0) {
             return;
@@ -228,6 +258,7 @@ public class Scope extends View {
         markerX[slot] = x;
         markerY[slot] = y;
         markerLabels[slot] = label;
+        markerRegisters[slot] = register;
         markerActive[slot] = true;
         invalidate();
     }
@@ -281,16 +312,64 @@ public class Scope extends View {
     }
 
     private void drawGrid(Canvas canvas) {
-        final float center = height / 2.0f;
         final float inset = dp(1.2f);
+        drawRegisterBands(canvas);
         canvas.drawRect(inset, inset, width - inset, height - inset, edgePaint);
-        canvas.drawLine(0.0f, center, width, center, centerPaint);
-        canvas.drawLine(0.0f, height / 3.0f, width, height / 3.0f, zonePaint);
-        canvas.drawLine(0.0f, height * 2.0f / 3.0f, width,
-                height * 2.0f / 3.0f, zonePaint);
+        for (int i = 1; i < registerCount; i++) {
+            float y = height * i / (float) registerCount;
+            registerLinePaint.setColor(withAlpha(
+                    RegisterLayout.colorFor(registerCount - 1 - i), 100));
+            canvas.drawLine(0.0f, y, width, y, registerLinePaint);
+        }
         int step = Math.max(1, xNoteScale);
         for (int x = step; x < width; x += step) {
             canvas.drawLine(x, 0.0f, x, height, gridPaint);
+        }
+    }
+
+    private void drawRegisterBands(Canvas canvas) {
+        if (registerCount <= 1) {
+            return;
+        }
+        final float spacing = dp(18.0f);
+        for (int i = 0; i < registerCount; i++) {
+            float top = height * i / (float) registerCount;
+            float bottom = height * (i + 1) / (float) registerCount;
+            int register = registerCount - 1 - i;
+            int color = RegisterLayout.colorFor(register);
+            registerFillPaint.setColor(withAlpha(color, 10));
+            canvas.drawRect(0.0f, top, width, bottom, registerFillPaint);
+            registerLinePaint.setColor(withAlpha(color, 28));
+            canvas.save();
+            canvas.clipRect(0.0f, top, width, bottom);
+            switch (register % 4) {
+                case 0:
+                    for (float x = -height; x < width + height; x += spacing) {
+                        canvas.drawLine(x, top, x + height, bottom,
+                                registerLinePaint);
+                    }
+                    break;
+                case 1:
+                    for (float x = -height; x < width + height; x += spacing) {
+                        canvas.drawLine(x, top, x - height, bottom,
+                                registerLinePaint);
+                    }
+                    break;
+                case 2:
+                    for (float x = -height; x < width + height; x += spacing) {
+                        canvas.drawLine(x, top, x + height, bottom,
+                                registerLinePaint);
+                        canvas.drawLine(x, top, x - height, bottom,
+                                registerLinePaint);
+                    }
+                    break;
+                default:
+                    for (float y = top + spacing; y < bottom; y += spacing) {
+                        canvas.drawLine(0.0f, y, width, y, registerLinePaint);
+                    }
+                    break;
+            }
+            canvas.restore();
         }
     }
 
@@ -300,10 +379,10 @@ public class Scope extends View {
                 || xNoteScale < dp(44.0f)) {
             return;
         }
-        final float[] zoneY = {height * 5.0f / 6.0f,
-                height / 2.0f + dp(16.0f), height / 6.0f};
         final float bottomY = height - dp(7.0f);
         final float zoneBaseline = zoneLabelPaint.getTextSize() / 3.0f;
+        final float zoneHeight = height / (float) registerCount;
+        final boolean drawZoneLabels = zoneHeight >= dp(28.0f);
         for (int cell = 0; cell < bottomLabels.length; cell++) {
             float cx = (cell + 0.5f) * xNoteScale;
             if (cx < dp(12.0f) || cx > width - dp(12.0f)) {
@@ -313,11 +392,18 @@ public class Scope extends View {
                 canvas.drawText(bottomLabels[cell], cx, bottomY,
                         noteLabelPaint);
             }
-            for (int zone = 0; zone < 3; zone++) {
+            if (!drawZoneLabels) {
+                continue;
+            }
+            for (int zone = 0; zone < registerCount; zone++) {
                 String label = zoneLabels[zone][cell];
                 if (label != null) {
-                    canvas.drawText(label, cx, zoneY[zone] + zoneBaseline,
-                            zoneLabelPaint);
+                    float baseline = (zone + 0.5f) * zoneHeight
+                            + zoneBaseline;
+                    if (baseline < dp(88.0f)) {
+                        continue;
+                    }
+                    canvas.drawText(label, cx, baseline, zoneLabelPaint);
                 }
             }
         }
@@ -331,23 +417,25 @@ public class Scope extends View {
         }
         if (cachedLabelVersion == labelVersion
                 && cachedLabelWidth == width
-                && cachedLabelScale == xNoteScale) {
+                && cachedLabelScale == xNoteScale
+                && cachedRegisterCount == registerCount) {
             return;
         }
         int columns = Math.max(1, (int) Math.ceil(width / (double) xNoteScale));
         String[] bottom = new String[columns];
-        String[][] zones = new String[3][columns];
+        String[][] zones = new String[registerCount][columns];
         for (int cell = 0; cell < columns; cell++) {
-            for (int zone = 0; zone < 3; zone++) {
+            for (int zone = 0; zone < registerCount; zone++) {
                 zones[zone][cell] = labelProvider.labelFor(cell, zone);
             }
-            bottom[cell] = zones[0][cell];
+            bottom[cell] = zones[registerCount - 1][cell];
         }
         zoneLabels = zones;
         bottomLabels = bottom;
         cachedLabelVersion = labelVersion;
         cachedLabelWidth = width;
         cachedLabelScale = xNoteScale;
+        cachedRegisterCount = registerCount;
     }
 
     private void drawSpectrum(Canvas canvas) {
@@ -429,14 +517,60 @@ public class Scope extends View {
             }
             float x = markerX[i];
             float y = markerY[i];
+            int color = RegisterLayout.colorFor(
+                    Math.max(0, markerRegisters[i]));
+            markerPaint.setColor(color);
+            markerFillPaint.setColor(withAlpha(color, 28));
             canvas.drawCircle(x, y, radius, markerFillPaint);
             canvas.drawCircle(x, y, radius, markerPaint);
             if (markerLabels[i] != null && markerLabels[i].length() > 0) {
-                canvas.drawText(markerLabels[i], x,
-                        Math.max(dp(12.0f), y - radius - dp(5.0f)),
-                        markerTextPaint);
+                drawMarkerCallout(canvas, x, y, markerLabels[i], color,
+                        radius);
             }
         }
+        markerTextPaint.setTextAlign(Paint.Align.CENTER);
+    }
+
+    private void drawMarkerCallout(Canvas canvas, float x, float y,
+                                   String label, int color, float radius) {
+        final float padX = dp(6.0f);
+        final float padY = dp(4.0f);
+        final float gap = dp(18.0f);
+        final float textWidth = markerTextPaint.measureText(label);
+        final float textHeight = markerTextPaint.getTextSize();
+        final float boxWidth = textWidth + padX * 2.0f;
+        final float boxHeight = textHeight + padY * 2.0f;
+        final boolean placeRight = x + radius + gap + boxWidth
+                <= width - dp(4.0f);
+        float left = placeRight ? x + radius + gap
+                : x - radius - gap - boxWidth;
+        float top = y - radius - gap - boxHeight;
+        if (top < dp(4.0f)) {
+            top = y + radius + gap;
+        }
+        left = Math.max(dp(4.0f),
+                Math.min(width - dp(4.0f) - boxWidth, left));
+        top = Math.max(dp(4.0f),
+                Math.min(height - dp(4.0f) - boxHeight, top));
+
+        markerChipRect.set(left, top, left + boxWidth, top + boxHeight);
+        markerChipPaint.setColor(0xE6080E12);
+        canvas.drawRoundRect(markerChipRect, dp(4.0f), dp(4.0f),
+                markerChipPaint);
+        markerChipBorderPaint.setColor(withAlpha(color, 180));
+        canvas.drawRoundRect(markerChipRect, dp(4.0f), dp(4.0f),
+                markerChipBorderPaint);
+
+        float leaderX = placeRight ? left : left + boxWidth;
+        float leaderY = top + boxHeight / 2.0f;
+        markerPaint.setColor(withAlpha(color, 130));
+        canvas.drawLine(x + (placeRight ? radius : -radius) * 0.8f, y,
+                leaderX, leaderY, markerPaint);
+
+        markerTextPaint.setTextAlign(Paint.Align.LEFT);
+        markerTextPaint.setColor(0xFFE6F1F5);
+        canvas.drawText(label, left + padX, top + padY + textHeight * 0.8f,
+                markerTextPaint);
     }
 
     private float dp(float value) {

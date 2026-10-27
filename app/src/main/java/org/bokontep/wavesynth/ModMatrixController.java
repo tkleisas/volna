@@ -66,7 +66,7 @@ public final class ModMatrixController {
     }
 
     private final Activity activity;
-    private final SynthEngine engine;
+    private final ModMatrixEngine engine;
     private final AppPreferences prefs;
     private final LinearLayout container;
     private final Button addButton;
@@ -87,7 +87,7 @@ public final class ModMatrixController {
     private boolean touchDeltaXRequired;
     private boolean touchDeltaYRequired;
 
-    public ModMatrixController(Activity activity, SynthEngine engine,
+    public ModMatrixController(Activity activity, ModMatrixEngine engine,
                                AppPreferences prefs) {
         this.activity = activity;
         this.engine = engine;
@@ -149,12 +149,14 @@ public final class ModMatrixController {
         targets.clear();
         targets.add(new Target("", "None", -1, 0, 0, 0.0f, 1.0f));
         final int mode = engine.getEngineMode();
-        if (mode == SynthEngine.ENGINE_YAWN_WAVETABLE) {
+        if (mode == ModMatrixEngine.ENGINE_YAWN_WAVETABLE) {
             addInstrumentTargets(mode, new int[]{2, 3, 1, 14, 16, 15});
-        } else if (mode == SynthEngine.ENGINE_YAWN_SUBTRACTIVE) {
+        } else if (mode == ModMatrixEngine.ENGINE_YAWN_SUBTRACTIVE) {
             addInstrumentTargets(mode, new int[]{8, 9, 4, 6, 7, 21});
+        } else if (mode == ModMatrixEngine.ENGINE_YAWN_KARPLUS) {
+            addInstrumentTargets(mode, new int[]{1, 2, 3, 4, 5, 7});
         }
-        if (mode != SynthEngine.ENGINE_LEGACY) {
+        if (mode != ModMatrixEngine.ENGINE_LEGACY) {
             // Type 3 is the native global pitch-bend destination. A full
             // amount spans +/- 12 semitones before summing/clamping.
             targets.add(new Target("pitch", "Pitch", 3, 0, 0,
@@ -516,7 +518,7 @@ public final class ModMatrixController {
         boolean[] required = new boolean[SensorModulation.SOURCE_COUNT];
         boolean any = false;
         if (engine != null
-                && engine.getEngineMode() != SynthEngine.ENGINE_LEGACY) {
+                && engine.getEngineMode() != ModMatrixEngine.ENGINE_LEGACY) {
             for (Row row : rows) {
                 if (row.enabled && row.target != null && row.source >= 0) {
                     required[row.source] = true;
@@ -575,7 +577,7 @@ public final class ModMatrixController {
             return;
         }
         if (engine != null
-                && engine.getEngineMode() == SynthEngine.ENGINE_LEGACY) {
+                && engine.getEngineMode() == ModMatrixEngine.ENGINE_LEGACY) {
             statusText.setText("Modulation is available in YAWN engines");
         } else {
             String status = sensors.statusText();
