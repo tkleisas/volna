@@ -40,8 +40,8 @@ android {
         applicationId "org.bokontep.wavesynth"
         minSdk 23
         targetSdk 34
-        versionCode 6
-        versionName "0.9.4-"+getCommitHash()
+        versionCode 7
+        versionName "0.9.5-"+getCommitHash()
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {

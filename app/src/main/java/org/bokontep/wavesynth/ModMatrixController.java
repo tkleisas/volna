@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** Editable sensor-to-parameter modulation matrix. */
+/** Editable sensor/touch-to-parameter modulation matrix. */
 public final class ModMatrixController {
     private static final String PREF_KEY = "modMatrixV1";
     private static final int MAX_ROWS = 6;
@@ -82,6 +82,10 @@ public final class ModMatrixController {
     private int liveSource = -1;
     private float liveValue;
     private int sensorMask;
+    private boolean touchXRequired;
+    private boolean touchYRequired;
+    private boolean touchDeltaXRequired;
+    private boolean touchDeltaYRequired;
 
     public ModMatrixController(Activity activity, SynthEngine engine,
                                AppPreferences prefs) {
@@ -151,6 +155,10 @@ public final class ModMatrixController {
             addInstrumentTargets(mode, new int[]{8, 9, 4, 6, 7, 21});
         }
         if (mode != SynthEngine.ENGINE_LEGACY) {
+            // Type 3 is the native global pitch-bend destination. A full
+            // amount spans +/- 12 semitones before summing/clamping.
+            targets.add(new Target("pitch", "Pitch", 3, 0, 0,
+                    -12.0f, 12.0f));
             int count = engine.getYawnAudioChainSize();
             for (int slot = 0; slot < count; slot++) {
                 String effect = engine.getYawnAudioChainName(slot);
@@ -523,6 +531,10 @@ public final class ModMatrixController {
             sensors.stop();
         }
         sensorMask = 0;
+        touchXRequired = required[SensorModulation.TOUCH_X];
+        touchYRequired = required[SensorModulation.TOUCH_Y];
+        touchDeltaXRequired = required[SensorModulation.TOUCH_DELTA_X];
+        touchDeltaYRequired = required[SensorModulation.TOUCH_DELTA_Y];
         if (required[SensorModulation.ACCEL_X]
                 || required[SensorModulation.ACCEL_Y]
                 || required[SensorModulation.ACCEL_Z]) {
@@ -567,11 +579,45 @@ public final class ModMatrixController {
             statusText.setText("Modulation is available in YAWN engines");
         } else {
             String status = sensors.statusText();
+            String touch = touchStatusLabel();
+            if (!touch.isEmpty()) {
+                if (sensors.needsSensors()) {
+                    status += " + " + touch;
+                } else {
+                    status = touch;
+                }
+            }
             if (sensors.isRunning() && liveSource >= 0) {
                 status += String.format(Locale.US, "  ·  %s %+.2f",
                         SensorModulation.sourceName(liveSource), liveValue);
             }
             statusText.setText(status);
+        }
+    }
+
+    private String touchStatusLabel() {
+        StringBuilder label = new StringBuilder();
+        if (touchXRequired) {
+            label.append('X');
+        }
+        if (touchYRequired) {
+            appendSeparator(label);
+            label.append('Y');
+        }
+        if (touchDeltaXRequired) {
+            appendSeparator(label);
+            label.append("ΔX");
+        }
+        if (touchDeltaYRequired) {
+            appendSeparator(label);
+            label.append("ΔY");
+        }
+        return label.length() == 0 ? "" : "Touch " + label;
+    }
+
+    private static void appendSeparator(StringBuilder label) {
+        if (label.length() > 0) {
+            label.append('/');
         }
     }
 

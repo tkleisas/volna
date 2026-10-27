@@ -1439,12 +1439,11 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
             handleNoteOff(event.channel, event.a);
             break;
         case EngineEvent::Type::NotePitch: {
-            const float normalized = std::clamp(
-                event.f / static_cast<float>(MicrotonalBendRange), -1.0f,
-                1.0f);
-            mMidiBuffer.addMessage(yawn::midi::MidiMessage::perNotePitchBend(
-                event.channel, event.a,
-                yawn::midi::Convert::floatToPb32(normalized)));
+            const int channel = event.channel & 15;
+            const int note = event.a & 127;
+            mActiveNoteBends[channel][note] = event.f;
+            sendPerNotePitch(channel, note,
+                             event.f + mPitchModSemitones);
             break;
         }
         case EngineEvent::Type::NoteTransition:
@@ -1625,11 +1624,18 @@ void YawnEngine::dispatchEvent(const EngineEvent& event, int numFrames) {
 }
 
 void YawnEngine::handleNoteOn(int channel, int note, int velocity) {
+    const int safeChannel = channel & 15;
+    const int safeNote = note & 127;
+    mActiveNoteBends[safeChannel][safeNote] = 0.0f;
     mMidiBuffer.addMessage(
         yawn::midi::MidiMessage::noteOn(channel, note, velocity));
+    if (std::abs(mPitchModSemitones) > 0.0001f) {
+        mPitchModDirty = true;
+    }
 }
 
 void YawnEngine::handleNoteOff(int channel, int note) {
+    mActiveNoteBends[channel & 15][note & 127] = 0.0f;
     mMidiBuffer.addMessage(yawn::midi::MidiMessage::noteOff(channel, note));
 }
 
@@ -1726,6 +1732,7 @@ void YawnEngine::handleControlChange(int channel, int control, int value) {
 
 void YawnEngine::handleAllNotesOff() {
     mMidiBuffer.addMessage(yawn::midi::MidiMessage::cc(0, 123, 0));
+    clearActiveNotes();
 }
 
 void YawnEngine::doSetPlay(bool play) {
@@ -1832,6 +1839,10 @@ void YawnEngine::clearActiveNotes() {
     for (auto& channel : mActiveNotes) {
         channel.fill(false);
     }
+    for (auto& channel : mActiveNoteBends) {
+        channel.fill(0.0f);
+    }
+    mPitchModDirty = false;
 }
 
 void YawnEngine::updateActiveNotes(
@@ -1843,6 +1854,7 @@ void YawnEngine::updateActiveNotes(
             mActiveNotes[channel][note] = msg.velocity > 0;
         } else if (msg.type == yawn::midi::MidiMessage::Type::NoteOff) {
             mActiveNotes[channel][note] = false;
+            mActiveNoteBends[channel][note] = 0.0f;
         } else if (msg.type == yawn::midi::MidiMessage::Type::ControlChange
                 && (msg.ccNumber == 120 || msg.ccNumber == 123)) {
             clearActiveNotes();
@@ -1858,6 +1870,21 @@ int YawnEngine::activeNoteCount() const {
         }
     }
     return count;
+}
+
+void YawnEngine::sendPerNotePitch(int channel, int note, float semitones) {
+    const float normalized = std::clamp(
+        semitones / static_cast<float>(MicrotonalBendRange), -1.0f, 1.0f);
+    mMidiBuffer.addMessage(yawn::midi::MidiMessage::perNotePitchBend(
+        channel, note, yawn::midi::Convert::floatToPb32(normalized)));
+}
+
+void YawnEngine::setPitchModulation(float semitones) {
+    if (std::abs(semitones - mPitchModSemitones) < 0.001f) {
+        return;
+    }
+    mPitchModSemitones = semitones;
+    mPitchModDirty = true;
 }
 
 bool YawnEngine::applyModTarget(int type, int slot, int param, float offset,
@@ -1922,12 +1949,17 @@ void YawnEngine::applyModulation() {
     std::array<ModTarget, kMaxModSlots> current{};
     std::array<float, kMaxModSlots> offsets{};
     int count = 0;
+    float pitchOffset = 0.0f;
     for (const auto& modSlot : mModSlots) {
         if (!modSlot.enabled || modSlot.targetType < 0) {
             continue;
         }
         const float offset = modSlot.amount *
             mModSmoothed[std::clamp(modSlot.source, 0, kModSourceCount - 1)];
+        if (modSlot.targetType == 3) {
+            pitchOffset += offset;
+            continue;
+        }
         int found = -1;
         for (int i = 0; i < count; ++i) {
             if (current[i].type == modSlot.targetType
@@ -1968,6 +2000,7 @@ void YawnEngine::applyModulation() {
     }
     mLastModTargets = current;
     mLastModTargetCount = count;
+    setPitchModulation(pitchOffset * kPitchModRangeSemitones);
 }
 
 void YawnEngine::copyWaveform(float* out, int length) const {
@@ -2016,6 +2049,18 @@ oboe::DataCallbackResult YawnEngine::onAudioReady(
         float* right = mMixBuffer.data() + 1;
 
         updateActiveNotes(mMidiBuffer);
+        if (mPitchModDirty) {
+            for (int pitchChannel = 0; pitchChannel < 16; ++pitchChannel) {
+                for (int pitchNote = 0; pitchNote < 128; ++pitchNote) {
+                    if (mActiveNotes[pitchChannel][pitchNote]) {
+                        sendPerNotePitch(pitchChannel, pitchNote,
+                                mActiveNoteBends[pitchChannel][pitchNote] +
+                                        mPitchModSemitones);
+                    }
+                }
+            }
+            mPitchModDirty = false;
+        }
         const int active = std::clamp(activeNoteCount(), 0, 16);
         const int effectiveVoices = std::max(1, active);
         const float polyTarget = mPolyphonyLeveling.load()

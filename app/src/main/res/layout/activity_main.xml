@@ -683,6 +683,19 @@
                         android:min="1500" />
 
                     <TextView
+                        android:id="@+id/pitchBendText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Pitch bend: 0%" />
+
+                    <SeekBar
+                        android:id="@+id/pitchBendSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="100"
+                        android:min="0" />
+
+                    <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Low register note offset" />
@@ -811,7 +824,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Route sensor motion or magnetic field to synth or effect parameters. Rows are off by default; sensors run only while an enabled row exists."
+                        android:text="Route sensor motion, touch position, or magnetic field to synth or effect parameters. Rows are off by default; motion sensors run only while an enabled row uses them."
                         android:textSize="11sp" />
 
                     <LinearLayout

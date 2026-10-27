@@ -102,6 +102,7 @@ public class MainActivity extends AppCompatActivity {
     private int highOffset = 24;
     private float tune = 440.0f;
     private float octaveFactor = 2.0f;
+    private float pitchBendAmount = 0.0f;
     private long settingsPressTime = 5000;
     private String rootNoteStr = "";
     private boolean red = false;
@@ -171,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
     private SeekBar tetSeekBar;
     private SeekBar tuneSeekBar;
     private SeekBar octaveFactorSeekBar;
+    private SeekBar pitchBendSeekBar;
     private SeekBar osc1AttackSeekBar;
     private SeekBar osc1DecaySeekBar;
     private SeekBar osc1SustainSeekBar;
@@ -194,6 +196,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tuneTextView;
     private TextView tetTextView;
     private TextView octaveFactorTextView;
+    private TextView pitchBendTextView;
     private TextView osc1AttackTextView;
     private TextView osc1DecayTextView;
     private TextView osc1SustainTextView;
@@ -301,6 +304,8 @@ public class MainActivity extends AppCompatActivity {
         tune = (prefs.readInt("tune", 4400) / 10.0f);
         tet = prefs.readInt("tet", 12);
         octaveFactor = (prefs.readInt("octaveFactor",2000)/1000.0f);
+        pitchBendAmount = Math.max(0.0f, Math.min(1.0f,
+                prefs.readInt("pitchBend", 0) / 100.0f));
         red = prefs.readInt("red", 0) == 0 ? false : true;
         legato = prefs.readInt("legato", 0)==0?false:true;
         safetyLimiter = prefs.readInt("safetyLimiter", 1) != 0;
@@ -517,6 +522,11 @@ public class MainActivity extends AppCompatActivity {
         this.octaveFactorTextView.setText(String.format(Locale.US, "Octave factor: %.2f", octaveFactor));
         this.octaveFactorSeekBar = (SeekBar)findViewById(R.id.octaveFactorSeekBar);
         this.octaveFactorSeekBar.setProgress((int) (octaveFactor * 1000));
+        this.pitchBendTextView = (TextView) findViewById(R.id.pitchBendText);
+        this.pitchBendTextView.setText("Pitch bend: "
+                + Math.round(pitchBendAmount * 100.0f) + "%");
+        this.pitchBendSeekBar = (SeekBar) findViewById(R.id.pitchBendSeekBar);
+        this.pitchBendSeekBar.setProgress(Math.round(pitchBendAmount * 100.0f));
 
 
         this.osc1AttackSeekBar = (SeekBar) findViewById(R.id.osc1AttackSeekBar);
@@ -723,6 +733,11 @@ public class MainActivity extends AppCompatActivity {
                     engine.setOctaveFactor(octaveFactor);
                     prefs.writeInt("octaveFactor",(int)(octaveFactor*1000));
                     updatePitchMapper();
+                } else if (id == R.id.pitchBendSeekBar) {
+                    pitchBendAmount = progress / 100.0f;
+                    pitchBendTextView.setText("Pitch bend: " + progress + "%");
+                    prefs.writeInt("pitchBend", progress);
+                    refreshActiveTouchPitch();
                 } else if (id == R.id.osc1AttackSeekBar) {
                     engine.setOsc1Attack(progress);
                     osc1AttackTextView.setText("Osc 1 attack: " + engine.getOsc1Attack());
@@ -824,6 +839,7 @@ public class MainActivity extends AppCompatActivity {
         this.tuneSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
         this.tetSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
         this.octaveFactorSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
+        this.pitchBendSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
         this.osc1AttackSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
         this.osc1DecaySeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
         this.osc1SustainSeekBar.setOnSeekBarChangeListener(onSeekBarChangeListener);
@@ -1083,7 +1099,8 @@ public class MainActivity extends AppCompatActivity {
             }
             engine.sendMidiNoteOn(0, voice.anchorNote, voice.velocity);
             engine.sendMidiNotePitch(0, voice.anchorNote,
-                    (float) voice.expression.bendSemitones());
+                    (float) TouchModulation.scaledBend(
+                            voice.expression.bendSemitones(), pitchBendAmount));
             engine.sendMidiNoteSpread(0, voice.anchorNote,
                     63 + voice.lastSpread);
             engine.selectWaveform(0, 0, voice.anchorNote, voice.waveform1);
@@ -1236,6 +1253,60 @@ public class MainActivity extends AppCompatActivity {
         return height;
     }
 
+    private float touchSurfaceWidth() {
+        float width = scope != null ? scope.getWidth() : 0.0f;
+        if (width <= 0.0f && performanceArea != null) {
+            width = performanceArea.getWidth();
+        }
+        if (width <= 0.0f) {
+            width = getResources().getDisplayMetrics().widthPixels;
+        }
+        return width;
+    }
+
+    private void publishTouchModulation(TouchVoice voice, float x, float y) {
+        if (engine == null || voice == null) {
+            return;
+        }
+        final float width = touchSurfaceWidth();
+        final float height = touchSurfaceHeight();
+        engine.setYawnModSource(SensorModulation.TOUCH_X,
+                TouchModulation.normalizedX(x, width));
+        engine.setYawnModSource(SensorModulation.TOUCH_Y,
+                TouchModulation.normalizedY(y, height));
+        engine.setYawnModSource(SensorModulation.TOUCH_DELTA_X,
+                TouchModulation.relativeX(x, voice.startX, width));
+        engine.setYawnModSource(SensorModulation.TOUCH_DELTA_Y,
+                TouchModulation.relativeY(y, voice.startY, height));
+    }
+
+    private void resetTouchModulation() {
+        if (engine == null) {
+            return;
+        }
+        engine.setYawnModSource(SensorModulation.TOUCH_X, 0.0f);
+        engine.setYawnModSource(SensorModulation.TOUCH_Y, 0.0f);
+        engine.setYawnModSource(SensorModulation.TOUCH_DELTA_X, 0.0f);
+        engine.setYawnModSource(SensorModulation.TOUCH_DELTA_Y, 0.0f);
+    }
+
+    private void sendTouchPitch(TouchVoice voice, int note,
+                                double bendSemitones) {
+        double bend = TouchModulation.scaledBend(bendSemitones,
+                pitchBendAmount);
+        engine.sendMidiNotePitch(0, note, (float) bend);
+        midiPitchBend(voice.channel, pitchBend14(bend));
+    }
+
+    private void refreshActiveTouchPitch() {
+        for (int i = 0; i < touchVoices.size(); i++) {
+            TouchVoice voice = touchVoices.valueAt(i);
+            sendTouchPitch(voice, voice.anchorNote,
+                    voice.expression.bendSemitones());
+        }
+        updateScopeText();
+    }
+
     private int zoneOffset(float y, float height) {
         if (y > 2.0f * height / 3.0f) {
             return lowOffset;
@@ -1268,15 +1339,18 @@ public class MainActivity extends AppCompatActivity {
         MicrotonalVoice.Transition transition = voice.expression.start(pitch);
         voice.anchorNote = transition.anchorNote;
         voice.lastSpread = (int) spreadForTouch(x);
+        voice.startX = x;
+        voice.startY = y;
+        voice.lastX = x;
+        voice.lastY = y;
         touchVoices.put(id, voice);
 
         engine.sendMidiNoteOn(0, transition.noteOn, velocity);
         midiNoteOn(channel, transition.noteOn, velocity);
-        engine.sendMidiNotePitch(0, transition.noteOn,
-                (float) transition.bendSemitones);
-        midiPitchBend(channel, pitchBend14(transition.bendSemitones));
+        sendTouchPitch(voice, transition.noteOn, transition.bendSemitones);
         sendTouchPressure(voice);
         selectWaveformForVoice(voice);
+        publishTouchModulation(voice, x, y);
         scope.setMarker("" + id, x, y, noteName(transition.noteOn)
                 + " " + velocity);
         vel = velocity;
@@ -1291,7 +1365,8 @@ public class MainActivity extends AppCompatActivity {
         final MicrotonalPitchMapper.Pitch pitch =
                 pitchMapper.pitchAt(x, zoneOffset(y, height));
         final MicrotonalVoice.Transition transition =
-                voice.expression.update(pitch, legato);
+                voice.expression.update(pitch,
+                        legato && pitchBendAmount > 0.001f);
 
         if (transition.noteOff >= 0) {
             engine.sendMidiNoteOff(0, transition.noteOff, 0);
@@ -1305,10 +1380,7 @@ public class MainActivity extends AppCompatActivity {
         voice.anchorNote = transition.anchorNote;
         voice.velocity = velocity;
         voice.pressure = TouchExpression.smooth(voice.pressure, expression);
-        engine.sendMidiNotePitch(0, transition.anchorNote,
-                (float) transition.bendSemitones);
-        midiPitchBend(voice.channel,
-                pitchBend14(transition.bendSemitones));
+        sendTouchPitch(voice, transition.anchorNote, transition.bendSemitones);
         sendTouchPressure(voice);
 
         int[] waveforms = waveformsForTouch(y, height);
@@ -1319,8 +1391,13 @@ public class MainActivity extends AppCompatActivity {
         voice.lastSpread = (int) spreadForTouch(x);
         engine.sendMidiNoteSpread(0, voice.anchorNote,
                 63 + voice.lastSpread);
+        voice.lastX = x;
+        voice.lastY = y;
+        publishTouchModulation(voice, x, y);
+        double playedPitch = voice.anchorNote + TouchModulation.scaledBend(
+                transition.bendSemitones, pitchBendAmount);
         int displayNote = Math.max(0, Math.min(127,
-                (int) Math.round(pitch.targetSemitones)));
+                (int) Math.round(playedPitch)));
         scope.setMarker("" + voice.pointerId, x, y,
                 noteName(displayNote) + " " + velocity);
         vel = velocity;
@@ -1339,6 +1416,12 @@ public class MainActivity extends AppCompatActivity {
         midiChannelPressure(voice.channel, 0);
         mpeChannelAllocator.release(voice.channel);
         touchVoices.remove(id);
+        if (touchVoices.size() == 0) {
+            resetTouchModulation();
+        } else {
+            TouchVoice remaining = touchVoices.valueAt(0);
+            publishTouchModulation(remaining, remaining.lastX, remaining.lastY);
+        }
         if (unsetMarker) {
             scope.unsetMarker("" + id);
         }
@@ -1349,6 +1432,7 @@ public class MainActivity extends AppCompatActivity {
             int id = touchVoices.keyAt(0);
             stopTouch(id, unsetMarkers);
         }
+        resetTouchModulation();
         if (mpeChannelAllocator != null) {
             mpeChannelAllocator.reset();
         }
@@ -1441,7 +1525,8 @@ public class MainActivity extends AppCompatActivity {
         }
         for (int i = 0; i < touchVoices.size(); i++) {
             TouchVoice voice = touchVoices.valueAt(i);
-            double target = voice.expression.currentPitch();
+            double target = voice.anchorNote + TouchModulation.scaledBend(
+                    voice.expression.bendSemitones(), pitchBendAmount);
             int displayNote = Math.max(0, Math.min(127,
                     (int) Math.round(target)));
             text.append("  ").append(noteName(displayNote));
@@ -1476,6 +1561,10 @@ public class MainActivity extends AppCompatActivity {
         int waveform2;
         int anchorNote;
         int lastSpread;
+        float startX;
+        float startY;
+        float lastX;
+        float lastY;
 
         TouchVoice(int pointerId, int channel) {
             this.pointerId = pointerId;

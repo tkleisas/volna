@@ -3,7 +3,9 @@ package org.bokontep.wavesynth;
 /**
  * Converts touch positions into standard MIDI notes plus a per-note pitch
  * offset. The note number is always a normal 0-127 MIDI note; tuning and
- * glissando live in the bend value instead of being baked into the note.
+ * glissando live in the bend value instead of being baked into the note. The
+ * note anchor is the pitch of the cell containing the touch centre, so it
+ * changes only when the centre crosses a vertical grid line.
  */
 public final class MicrotonalPitchMapper {
     public static final double BEND_RANGE_SEMITONES = 48.0;
@@ -35,15 +37,15 @@ public final class MicrotonalPitchMapper {
 
     public static final class Pitch {
         public final double targetSemitones;
-        public final int nearestNote;
+        public final int cellNote;
         public final double bendSemitones;
         public final int cell;
         public final double cellFraction;
 
-        public Pitch(double targetSemitones, int nearestNote,
+        public Pitch(double targetSemitones, int cellNote,
                      double bendSemitones, int cell, double cellFraction) {
             this.targetSemitones = targetSemitones;
-            this.nearestNote = nearestNote;
+            this.cellNote = cellNote;
             this.bendSemitones = bendSemitones;
             this.cell = cell;
             this.cellFraction = cellFraction;
@@ -57,8 +59,10 @@ public final class MicrotonalPitchMapper {
         final double first = pitchForCell(cell, offsetSemitones);
         final double next = pitchForCell(cell + 1, offsetSemitones);
         final double target = first + (next - first) * fraction;
-        final int nearest = clampNote((int) Math.round(target));
-        return new Pitch(target, nearest, target - nearest, cell, fraction);
+        // The note anchor follows the visible cell, so it changes only when
+        // the touch centre crosses a vertical grid line.
+        final int cellNote = clampNote((int) Math.round(first));
+        return new Pitch(target, cellNote, target - cellNote, cell, fraction);
     }
 
     public double pitchForCell(int cell, int offsetSemitones) {

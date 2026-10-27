@@ -3,7 +3,7 @@ package org.bokontep.wavesynth;
 /**
  * Per-touch note state for the hybrid gesture model:
  * - legato keeps one anchor note and slides with a wide bend;
- * - non-legato follows the nearest note and re-triggers on note crossings;
+ * - non-legato follows the cell note and re-triggers at cell boundaries;
  * - both re-anchor when the bend range is exceeded.
  */
 public final class MicrotonalVoice {
@@ -48,7 +48,7 @@ public final class MicrotonalVoice {
 
     public Transition start(MicrotonalPitchMapper.Pitch pitch) {
         active = true;
-        anchorNote = pitch.nearestNote;
+        anchorNote = pitch.cellNote;
         bendSemitones = clampBend(pitch.targetSemitones - anchorNote);
         return new Transition(-1, anchorNote, anchorNote, bendSemitones, false);
     }
@@ -59,18 +59,18 @@ public final class MicrotonalVoice {
         }
 
         final int oldAnchor = anchorNote;
-        final int nearest = pitch.nearestNote;
+        final int cellNote = pitch.cellNote;
         boolean noteOff = false;
         boolean noteOn = false;
 
         if (legato) {
             if (Math.abs(pitch.targetSemitones - anchorNote) > BEND_RANGE) {
-                anchorNote = nearest;
+                anchorNote = cellNote;
                 noteOff = true;
                 noteOn = true;
             }
-        } else if (nearest != anchorNote) {
-            anchorNote = nearest;
+        } else if (cellNote != anchorNote) {
+            anchorNote = cellNote;
             noteOff = true;
             noteOn = true;
         }

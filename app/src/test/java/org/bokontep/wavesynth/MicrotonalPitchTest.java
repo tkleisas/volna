@@ -15,17 +15,17 @@ public class MicrotonalPitchTest {
 
         MicrotonalPitchMapper.Pitch atZero = mapper.pitchAt(0, 0);
         assertEquals(60.0, atZero.targetSemitones, EPS);
-        assertEquals(60, atZero.nearestNote);
+        assertEquals(60, atZero.cellNote);
         assertEquals(0.0, atZero.bendSemitones, EPS);
 
         MicrotonalPitchMapper.Pitch halfway = mapper.pitchAt(50, 0);
         assertEquals(60.5, halfway.targetSemitones, EPS);
-        assertEquals(61, halfway.nearestNote);
-        assertEquals(-0.5, halfway.bendSemitones, EPS);
+        assertEquals(60, halfway.cellNote);
+        assertEquals(0.5, halfway.bendSemitones, EPS);
 
         MicrotonalPitchMapper.Pitch next = mapper.pitchAt(100, 0);
         assertEquals(61.0, next.targetSemitones, EPS);
-        assertEquals(61, next.nearestNote);
+        assertEquals(61, next.cellNote);
         assertEquals(0.0, next.bendSemitones, EPS);
 
         assertEquals(72.0, mapper.pitchAt(0, 12).targetSemitones, EPS);
@@ -37,11 +37,11 @@ public class MicrotonalPitchTest {
 
         MicrotonalPitchMapper.Pitch a4 = mapper.pitchAt(0, 0);
         assertEquals(69.0, a4.targetSemitones, EPS);
-        assertEquals(69, a4.nearestNote);
+        assertEquals(69, a4.cellNote);
 
         MicrotonalPitchMapper.Pitch quarterTone = mapper.pitchAt(100, 0);
         assertEquals(69.5, quarterTone.targetSemitones, EPS);
-        assertEquals(70, quarterTone.nearestNote);
+        assertEquals(70, quarterTone.cellNote);
         assertEquals(-0.5, quarterTone.bendSemitones, EPS);
 
         assertEquals(70.0, mapper.pitchAt(200, 0).targetSemitones, EPS);
@@ -86,11 +86,24 @@ public class MicrotonalPitchTest {
     }
 
     @Test
-    public void nearestNoteIsAlwaysInMidiRange() {
+    public void cellNoteIsAlwaysInMidiRange() {
         MicrotonalPitchMapper mapper = mapper(60, chromatic(), 24, 440.0, 2.0, 100);
-        assertTrue(mapper.pitchAt(0, 0).nearestNote >= 0);
-        assertTrue(mapper.pitchAt(0, 0).nearestNote <= 127);
-        assertTrue(mapper.pitchAt(100000, 0).nearestNote <= 127);
+        assertTrue(mapper.pitchAt(0, 0).cellNote >= 0);
+        assertTrue(mapper.pitchAt(0, 0).cellNote <= 127);
+        assertTrue(mapper.pitchAt(100000, 0).cellNote <= 127);
+    }
+
+    @Test
+    public void noteChangesAtCellBoundaryNotHalfway() {
+        MicrotonalPitchMapper mapper = mapper(60, chromatic(), 12, 440.0, 2.0, 100);
+
+        assertEquals(60, mapper.pitchAt(0, 0).cellNote);
+        assertEquals(60, mapper.pitchAt(50, 0).cellNote);
+        assertEquals(60, mapper.pitchAt(99, 0).cellNote);
+        assertEquals(61, mapper.pitchAt(100, 0).cellNote);
+        assertEquals(61, mapper.pitchAt(150, 0).cellNote);
+        assertEquals(61, mapper.pitchAt(199, 0).cellNote);
+        assertEquals(62, mapper.pitchAt(200, 0).cellNote);
     }
 
     @Test
@@ -176,9 +189,9 @@ public class MicrotonalPitchTest {
                 xNoteScale);
     }
 
-    private static MicrotonalPitchMapper.Pitch pitch(double target, int nearest,
+    private static MicrotonalPitchMapper.Pitch pitch(double target, int cellNote,
                                                      double bend) {
-        return new MicrotonalPitchMapper.Pitch(target, nearest, bend, 0, 0.0);
+        return new MicrotonalPitchMapper.Pitch(target, cellNote, bend, 0, 0.0);
     }
 
     private static int[] chromatic() {

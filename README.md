@@ -26,7 +26,7 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
 - [Effect chains](#effect-chains)
 - [Microtonal tuning and MPE](#microtonal-tuning-and-mpe)
 - [Touch pressure](#touch-pressure)
-- [Motion modulation matrix](#motion-modulation-matrix)
+- [Motion and touch modulation matrix](#motion-and-touch-modulation-matrix)
 - [Wavetables and VWaveEditor import](#wavetables-and-vwaveeditor-import)
 - [YAWN integration over RTP-MIDI](#yawn-integration-over-rtp-midi)
 - [MIDI controller and device support](#midi-controller-and-device-support)
@@ -49,8 +49,11 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
 - Full-bleed performance area: the grid and waveform extend behind the dim
   top strip, so the playing surface reaches the screen edges. The strip carries
   the wordmark, note/scale readout, engine, display mode, and DSP meter.
-- Horizontal position selects pitch; vertical position selects octave/wavetable
-  colour and brightness.
+- Horizontal position selects notes; the **Pitch bend** slider adds optional
+  microtonal bend and defaults to 0%. Vertical position selects
+  octave/wavetable colour and brightness.
+- Touch X and Touch Y are available as bipolar modulation sources in the MOD
+  matrix; they follow the most recently moved finger.
 - The note grid is drawn edge-to-edge, with cell boundaries and brighter
   low/mid/high register separators. **Grid size** sets how many pixels of
   horizontal travel are needed to reach the next note.
@@ -151,10 +154,11 @@ Tuning is no longer baked into MIDI note numbers. Touch input is converted to a
 continuous target pitch in standard 12-TET semitones, then split into:
 
 - a normal MIDI note (0–127), and
-- a per-note pitch-bend offset.
+- a per-note pitch-bend offset scaled by the **Pitch bend** control.
 
-This keeps external MIDI note numbers meaningful while allowing arbitrary
-microtonal pitches and glissandi.
+The Pitch bend control defaults to 0%, so horizontal position selects quantized
+notes without detuning. Raise it to restore microtonal pitch and glissando. At
+0%, legato sliding is bypassed and notes retrigger at cell boundaries.
 
 Supported controls:
 
@@ -170,10 +174,12 @@ Supported controls:
 
 Gesture model:
 
-- **Legato on**: each touch keeps an anchor note and slides with up to ±48
-  semitones of bend. It re-anchors only when the range is exceeded.
-- **Legato off**: the nearest standard note follows the touch and the bend stays
-  small, with note retriggering at crossings.
+- **Legato on**: with pitch bend above 0%, each touch keeps an anchor note and
+  slides with up to ±48 semitones of bend. It re-anchors only when the range is
+  exceeded.
+- **Legato off**: the cell note follows the touch and the bend stays small,
+  with note retriggering only when the touch centre crosses a vertical cell
+  boundary. Legato is bypassed when Pitch bend is 0%.
 - Internal voices receive per-note pitch bend, applied independently per voice.
 - External MIDI uses **MPE**: one member channel per touch, channel pitch bend,
   channel pressure, and automatic lower-zone plus 48-semitone range RPNs.
@@ -188,11 +194,11 @@ Gesture model:
 - Per-finger pressure is tracked independently.
 - The velocity value is displayed next to the active note marker.
 
-## Motion modulation matrix
+## Motion and touch modulation matrix
 
-The **MOD** tab contains a small sensor-to-parameter matrix. Rows are disabled
-by default, and the sensors are only registered while at least one enabled row
-exists, so idle battery use stays low.
+The **MOD** tab contains a small sensor/touch-to-parameter matrix. Rows are
+disabled by default, and the motion sensors are only registered while at least
+one enabled row uses them, so idle battery use stays low.
 
 Sources:
 
@@ -200,6 +206,14 @@ Sources:
 - Gyroscope X/Y/Z
 - Magnetometer X/Y/Z
 - Magnetometer magnitude
+- Touch X (absolute horizontal position, -1..1)
+- Touch Y (absolute vertical position, top +1 to bottom -1)
+- Touch ΔX / Touch ΔY (movement since touch-down; zero at touch-down and
+  reaches +/-1 after half-screen travel)
+
+Touch sources do not require sensor hardware and follow the most recently moved
+finger. For touch-relative pitch, route **Touch ΔX → Pitch**: the bend starts
+at zero where the finger lands and follows horizontal movement from there.
 
 Sensors are normalized and low-pass filtered. The first event after enabling a
 sensor (or pressing **Calibrate sensors**) becomes the zero baseline, making the
@@ -215,6 +229,9 @@ Targets:
 - **Synth**: filter cutoff, filter resonance, wavetable position, LFO amount,
   unison detune, sub level, oscillator detune, and noise level where applicable
   to the selected YAWN instrument.
+- **Performance**: Pitch. This applies per-note pitch bend to all held voices;
+  a full amount spans +/- 12 semitones and is added to the touch pitch-bend
+  setting.
 - **Audio FX**: continuous parameters of every effect currently in the audio
   chain. Boolean and stepped parameters are excluded.
 
@@ -302,9 +319,9 @@ Persisted state:
 - Engine selection, YAWN instrument, tempo, master volume.
 - Both YAWN instrument parameter banks.
 - Every MIDI/audio effect chain: composition, order, bypass, and parameters.
-- Tuning, scale, root, register offsets, grid size, legato, red phosphor,
-  scope display mode, selected settings tab, output limiter, and polyphony
-  leveling.
+- Tuning, scale, root, register offsets, grid size, legato, pitch bend, red
+  phosphor, scope display mode, selected settings tab, output limiter, and
+  polyphony leveling.
 - Imported wavetable bytes and display name.
 - RTP-MIDI host/port/enabled state.
 - Modulation matrix rows, sources, targets, amounts, and enable states.

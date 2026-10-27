@@ -8,7 +8,7 @@ import android.hardware.SensorManager;
 
 /** Normalizes phone motion/magnetic sensors for the modulation matrix. */
 public final class SensorModulation implements SensorEventListener {
-    public static final int SOURCE_COUNT = 10;
+    public static final int SOURCE_COUNT = 14;
     public static final int ACCEL_X = 0;
     public static final int ACCEL_Y = 1;
     public static final int ACCEL_Z = 2;
@@ -19,6 +19,11 @@ public final class SensorModulation implements SensorEventListener {
     public static final int MAG_Y = 7;
     public static final int MAG_Z = 8;
     public static final int MAG_MAGNITUDE = 9;
+    public static final int TOUCH_X = 10;
+    public static final int TOUCH_Y = 11;
+    public static final int TOUCH_DELTA_X = 12;
+    public static final int TOUCH_DELTA_Y = 13;
+    private static final int SENSOR_SOURCE_COUNT = 10;
 
     public interface Listener {
         void onModSource(int source, float value);
@@ -27,7 +32,8 @@ public final class SensorModulation implements SensorEventListener {
     private static final String[] SOURCE_NAMES = {
             "Accel X", "Accel Y", "Accel Z",
             "Gyro X", "Gyro Y", "Gyro Z",
-            "Mag X", "Mag Y", "Mag Z", "Mag magnitude"
+            "Mag X", "Mag Y", "Mag Z", "Mag magnitude",
+            "Touch X", "Touch Y", "Touch ΔX", "Touch ΔY"
     };
 
     private final SensorManager manager;
@@ -64,6 +70,14 @@ public final class SensorModulation implements SensorEventListener {
         return SOURCE_NAMES[source];
     }
 
+    public static boolean isSensorSource(int source) {
+        return source >= 0 && source < SENSOR_SOURCE_COUNT;
+    }
+
+    public static boolean isTouchSource(int source) {
+        return source >= TOUCH_X && source <= TOUCH_DELTA_Y;
+    }
+
     public static boolean isAccelerometerSource(int source) {
         return source >= ACCEL_X && source <= ACCEL_Z;
     }
@@ -83,7 +97,7 @@ public final class SensorModulation implements SensorEventListener {
         for (int i = 0; i < SOURCE_COUNT; i++) {
             required[i] = sourceRequired != null
                     && i < sourceRequired.length && sourceRequired[i];
-            if (!required[i]) {
+            if (!required[i] || !isSensorSource(i)) {
                 continue;
             }
             if (isAccelerometerSource(i)) {
@@ -124,8 +138,8 @@ public final class SensorModulation implements SensorEventListener {
     }
 
     public boolean needsSensors() {
-        for (boolean value : required) {
-            if (value) {
+        for (int i = 0; i < SENSOR_SOURCE_COUNT; i++) {
+            if (required[i]) {
                 return true;
             }
         }
