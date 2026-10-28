@@ -29,7 +29,7 @@ def releaseStorePath = signingValue("RELEASE_KEYSTORE_PATH", "storeFile")
 
 android {
     namespace 'org.bokontep.wavesynth'
-    compileSdk 34
+    compileSdk 36
     ndkVersion "27.2.12479018"
 
     buildFeatures {
@@ -38,12 +38,15 @@ android {
 
     defaultConfig {
         applicationId "gr.tkleisas.volna"
-        minSdk 23
-        targetSdk 34
-        versionCode 10
-        versionName "0.10.2-"+getCommitHash()
+        minSdk 29
+        targetSdk 36
+        versionCode 11
+        versionName "0.10.3-"+getCommitHash()
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
         externalNativeBuild {
             cmake {
                 cppFlags "-O3"

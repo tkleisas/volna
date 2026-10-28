@@ -472,7 +472,7 @@ store/                      Play Store icon, feature graphic, and screenshots
 Requirements:
 
 - JDK 17
-- Android SDK (compileSdk 34)
+- Android SDK (compileSdk 36)
 - Android NDK `27.2.12479018`
 - CMake `3.22.1`
 
