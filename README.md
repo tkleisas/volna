@@ -7,7 +7,8 @@ chains, microtonal tuning, MPE output, and a Wi-Fi RTP-MIDI bridge to
 [YAWN](https://github.com/tkleisas/yawn).
 
 Prebuilt APKs are published on the
-[releases page](https://github.com/tkleisas/volna/releases).
+[releases page](https://github.com/tkleisas/volna/releases). Project site:
+<https://tkleisas.github.io/volna/>.
 
 ![Volna feature graphic](./store/feature-graphic-1024x500.png?raw=true)
 
