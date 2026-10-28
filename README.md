@@ -1,7 +1,7 @@
 # volna — wavetable touch synthesizer for Android
 
-**волна** (pronounced *volna*) means “wave” in Russian. Volna is a landscape,
-multitouch wavetable instrument for Android. It combines a large expressive touch
+**волна** (pronounced *volna*) means “wave” in Russian. Volna is a Bokontep
+music project: a landscape, multitouch wavetable instrument for Android. It combines a large expressive touch
 surface with four selectable synthesis engines, editable MIDI and audio effect
 chains, microtonal tuning, MPE output, and a Wi-Fi RTP-MIDI bridge to
 [YAWN](https://github.com/tkleisas/yawn).
@@ -9,11 +9,13 @@ chains, microtonal tuning, MPE output, and a Wi-Fi RTP-MIDI bridge to
 Prebuilt APKs are published on the
 [releases page](https://github.com/tkleisas/volna/releases).
 
-![Volna wavetables](./images/volnawavetable.gif?raw=true)
+![Volna feature graphic](./store/feature-graphic-1024x500.png?raw=true)
 
-![Volna performance surface with waveform and spectrum](./images/volna0.9.3-scope.png?raw=true)
+![Volna multitouch performance surface](./store/phone/01-expressive-multitouch-performance.png?raw=true)
 
-![Volna effect-chain settings](./images/volna0.9.3-fx.png?raw=true)
+![Volna YAWN synthesis engines](./store/phone/02-three-yawn-synthesis-engines.png?raw=true)
+
+![Volna custom scale editor](./store/phone/03-design-your-own-scales.png?raw=true)
 
 Demo video: <https://youtu.be/Cf_wpDYhudk>
 
@@ -39,7 +41,6 @@ Demo video: <https://youtu.be/Cf_wpDYhudk>
 - [Testing and CI](#testing-and-ci)
 - [Known limitations and roadmap](#known-limitations-and-roadmap)
 - [Credits and licenses](#credits-and-licenses)
-- [Greek documentation](#greek-documentation)
 
 ---
 
@@ -327,9 +328,7 @@ playing while editing. The panel has six tabs, each with collapsible cards:
 The selected tab is remembered. Controls use consistent label/value rows,
 accent-tinted sliders, compact toggles, and larger touch targets.
 
-![Volna output safety controls](./images/volna0.9.3-safety.png?raw=true)
-
-![Volna modulation matrix](./images/volna0.9.3-mod.png?raw=true)
+![Volna modulation matrix](./store/phone/05-modulate-with-motion-and-touch.png?raw=true)
 
 Persisted state:
 
@@ -462,6 +461,7 @@ app/src/test/                JVM unit tests
 scripts/sync_yawn_dsp.sh     refresh vendored YAWN DSP
 scripts/check_16kb_page_size.sh  release APK/AAB page-size verification
 native-tests/               host-compiled YAWN DSP tests
+store/                      Play Store icon, feature graphic, and screenshots
 .github/workflows/android.yml CI build, tests, and signed releases
 ```
 
@@ -485,7 +485,9 @@ cd volna
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 You can also open the project in Android Studio, install the NDK above, and
-build the `app` configuration.
+build the `app` configuration. The Play application ID is
+`gr.tkleisas.volna`; the Java namespace stays `org.bokontep.wavesynth` for
+source and JNI compatibility.
 
 Release builds read signing values from `~/.volna/keystore.properties` (or the
 `RELEASE_KEYSTORE_PATH`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and
@@ -548,44 +550,8 @@ chain state.
 - nlohmann/json: MIT.
 - Google Oboe: Apache 2.0.
 - VWaveEditor: `.vwt` format and wavetable tooling.
-- Original Volna project by Bokontep: <https://github.com/bokontep> ·
+- Volna is the Bokontep music project. Original project, sound design, and
+  identity by Bokontep: <https://github.com/bokontep> ·
   <https://www.bokontep.gr>.
 
 ---
-
-<a id="greek-documentation"></a>
-
-# Βόλνα, πολυφωνικό-πολυδειγματικό συνθεσάϊζερ για android
-
-> Η ελληνική ενότητα είναι ιστορική. Η αγγλική τεκμηρίωση παραπάνω είναι η
-> πλήρης και ενημερωμένη περιγραφή των λειτουργιών.
-
-Το волна (βόλνα) σημαίνει κύμα στα Ρώσικα και είναι ένα συνθεσάϊζερ που δουλεύει σε κινητά και τάμπλετ με μια σχετικά πρόσφατη έκδοση android (το έχω δοκιμάσει σε Android 8 και Android 10). Η αρχιτεκτονική του είναι πολυφωνική (10 φωνές, όσα και τα δάχτυλα των περισσοτέρων από εμάς). Κάθε φωνή έχει 2 ταλαντωτές οι οποίοι έχουν 256 κυματομορφές. Οι κυματομορφές είναι ημίτονο, τριγωνική, τετραγωνική, πριονωτή και θόρυβος μιξαρισμένες μεταξύ τους και φιλτραρισμένες με ένα χαμηλοπερατό φίλτρο προκειμένου να περιοριστεί το aliasing. Στην εικόνα μπορείτε να δείτε τις κυματομορφές:
-![Image of volna wavetables](./images/volnawavetable.gif?raw=true)
-Για να παίξετε το volna απλά ακουμπάτε τα δάχτυλά σας στην οθόνη. Οι κάθετες γραμμές δείχνουν τα όρια των μουσικών φθόγγων. Στο κάτω μέρος της οθόνης είναι οι πιο μπάσσες νότες, ενώ πιο πάνω οι πιο πρίμες. Αναλυτικά το βόλνα υποστηρίζει μέσω του μενού:
-1. Επιλογή βασικής νότας (η νότα από την οποία ξεκινά η κλίμακα)
-2. Κλίμακες (για την ώρα υποστηρίζονται μόνο στο κούρδισμα TET 12. Οι κλίμακες είναι χρωματική (όλοι οι φθόγγοι, ματζόρε, διάφορες μινόρε, πεντατονική, μπλούζ, κινέζικη πεντατονική, ολόκληρου τόνου, μισού ολόκληρου- ολόκληρου μισού κ.α.). Σύντομα θα μπορείτε να προσθέτετε και τις δικές σας και μάλιστα και σε διαφορετικά κουρδίσματα.
-3. Συχνότητα του Λα (δυνατότητα επιλογής από τα 400 ως τα 500 Hz.
-4. Συντελεστής οκτάβας (κανονικά είναι 2, αλλά μπορείτε να τον θέσετε μεταξύ 1.5 και 2.5)
-5. Κούρδισμα Tuning Equal Temperament (Μικροτονική Μουσική). Δυνατότητα από 2 έως 48 (θα προστεθούν και άλλα). Φυσικά οι περισσότεροι χρησιμοποιούν το 12.
-6. Legato (αλλαγή συχνότητας στη νότα χωρίς να ενεργοποιηθεί εκ νέου η περιβάλλουσα).
-7. Μία περιβάλλουσα ADSR για κάθε ταλαντωτή.
-8. Άπλωμα ταλαντωτών. Μπορούμε αν μετακινήσουμε το δαχτυλό μας ελαφρά δεξιά - αριστερά να αυξήσουμε την απόσταση των ταλαντωτών από την κεντρική συχνότητα της νότας μας.
-9. Επιλογή αρχικής κυματομορφής ταλαντωτή (μπορούμε να διαλέξουμε μεταξύ 256 διαφορετικών κυματομορφών)
-10. Δυνατότητα αλλαγής της κυματομορφής μετακινώντας το δάχτυλό μας κατακόρυφα. Όταν η παράμετρος WaveControl είναι στη μέγιστη τιμή της, μπορούμε να μετακινηθούμε και στις 256 κυματομορφές σχετικά με την αρχική μας, ενώ όσο μικρότερη τιμή έχει τόσο λιγότερο μετακινούμαστε. Όταν η τιμή είναι 0 η κυματομορφή μας δεν αλλάζει.
-11. Εφέ καθυστέρησης - ηχούς με δυνατότητα προσδιορισμού της έντασης, του χρόνου καθυστέρησης και της ανάδρασης.
-12. Πάχος πλέγματος. Καθορίζει πόσο πρέπει να μετακινήσουμε το δάχτυλό μας προκειμένου να μετακινηθούμε στην επόμενη νότα.
-13. Δυνατότητα να στείλουμε μέσω midi νότες στο volna και αυτό να της παίξει (μέσω σύνδεσης με το καλώδιο USB, ή επιλέγοντας κάποια άλλη εφαρμογή που μπορεί να στείλει midi).
-14. Δυνατότητα να στείλουμε midi μέσω καλωδίου USB ή σε άλλη εφαρμογή στο τηλέφωνό μας). Λειτουργία MIDI controller.
-
-
-Για να μπούμε στο μενού επιλογών μπορούμε να πατήσουμε το κουμπί SET.
-Με τα κουμπιά REC και PLAY, μπορούμε να ηχογραφήσουμε ένα loop διάρκειας μέχρι ενός λεπτού και να το βάλουμε να παίζει, ενώ εμείς μπορούμε να παίζουμε από πάνω.
-Το πρόγραμμα αυτό είναι δωρεάν, είναι ελεύθερο λογισμικό - λογισμικό ανοιχτού κώδικα κα μπορείτε να το βρείτε εδώ:
-https://github.com/bokontep/volna
-Αν θέλετε να κατεβάσετε ένα έτοιμο APK για να εγκαταστήσετε στο τάμπλετ ή στο κινητό σας μπορείτε να πάτε εδώ:
-https://github.com/bokontep/volna/releases
-Κάνοντας κλικ στα assets αυτά ανοίγουν και μπορείτε να επιλέξετε το APK που θέλετε. Το πιο πρόσφατο είναι αυτό:
-https://github.com/bokontep/volna/releases/download/0.8c/volna0.8c.apk
-
-Αυτά και καλή διασκέδαση!
