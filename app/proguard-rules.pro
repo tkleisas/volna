@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# JNI entry points are resolved by their exact Java class/method names.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+-keep class org.bokontep.wavesynth.SynthEngine { *; }
+
+# Android framework instantiates this service from the manifest.
+-keep class org.bokontep.wavesynth.VolnaMidiDeviceService { *; }

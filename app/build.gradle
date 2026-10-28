@@ -40,8 +40,8 @@ android {
         applicationId "gr.tkleisas.volna"
         minSdk 29
         targetSdk 36
-        versionCode 11
-        versionName "0.10.3-"+getCommitHash()
+        versionCode 12
+        versionName "0.10.4-"+getCommitHash()
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk {
@@ -70,7 +70,8 @@ android {
             if (releaseStorePath) {
                 signingConfig signingConfigs.release
             }
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             debuggable false
             jniDebuggable false
