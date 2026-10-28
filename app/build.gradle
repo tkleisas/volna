@@ -37,11 +37,11 @@ android {
     }
 
     defaultConfig {
-        applicationId "org.bokontep.wavesynth"
+        applicationId "gr.tkleisas.volna"
         minSdk 23
         targetSdk 34
-        versionCode 8
-        versionName "0.10.0-"+getCommitHash()
+        versionCode 9
+        versionName "0.10.1-"+getCommitHash()
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
